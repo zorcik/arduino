@@ -1,9 +1,20 @@
+/**
+ * Simple preamplifier built on top of TDA7313
+ * With radio built on top of TEA5767, AUX for TV and 3rd channel for BLE Audio
+ * 
+ * @author Jacek Partyka, WebLogic.pl
+ * @copyright 2016 WebLogic.pl
+ */
+
+#include <TEA5767Radio.h>
 #include <IRLib.h>
 #include <LiquidCrystal.h>
 #include <Wire.h>
 
 
-int volume = 10;
+#define MENU_POSITIONS 8
+
+int volume = 35;
 unsigned long currentTime;
 unsigned long loopTime;
 const int pin_A = 8;  // pin 8
@@ -21,14 +32,90 @@ IRdecode My_Decoder;
 bool isOn = true;
 int frequency = 1049;
 int tmpFreq = 1049;
-//TEA5767Radio radio = TEA5767Radio();
+TEA5767Radio radio = TEA5767Radio();
 
-int activeChannel = 2;
+int balance = 0;
+int fader = 0;
+int gain = 0;
+int bass = 0;
+int treb = 0;
+int loud = 0;
+
+int lf = 31;
+int rf = 31;
+int lr = 31;
+int rr = 31;
+
+byte activeChannel = 2;
 
 // initialize the library with the numbers of the interface pins
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
-void setup() {
+void setup() { 
+  byte full[8] = {0b11111,
+ 0b11111,
+  0b11111,
+  0b11111,
+  0b11111,
+  0b11111,
+  0b11111,
+  0b11111};
+byte empt[8] = {0b11111,
+ 0b00000,
+  0b00000,
+  0b00000,
+  0b00000,
+  0b00000,
+  0b00000,
+  0b11111};
+byte on5[8] = {0b11111,
+ 0b10000,
+  0b10000,
+  0b10000,
+  0b10000,
+  0b10000,
+  0b10000,
+  0b11111};
+byte two5[8] = {0b11111,
+  0b11000,
+  0b11000,
+  0b11000,
+  0b11000,
+  0b11000,
+  0b11000,
+  0b11111};
+byte three5[8] = {0b11111,
+  0b11100,
+  0b11100,
+  0b11100,
+  0b11100,
+  0b11100,
+  0b11100,
+  0b11111};
+byte four5[8] = {0b11111,
+ 0b11110,
+  0b11110,
+  0b11110,
+  0b11110,
+  0b11110,
+  0b11110,
+  0b11111};
+byte arr[8] = {0b10000,
+ 0b11000,
+  0b11100,
+  0b11110,
+  0b11110,
+  0b11100,
+  0b11000,
+  0b10000};
+  lcd.createChar(0, full);
+  lcd.createChar(1, empt);
+  lcd.createChar(2, on5);
+  lcd.createChar(3, two5);
+  lcd.createChar(4, three5);
+  lcd.createChar(5, four5);
+  lcd.createChar(6, arr);
+  
   pinMode(pin_A, INPUT);
   pinMode(pin_B, INPUT);
   pinMode(confirmButton, INPUT);
@@ -43,28 +130,75 @@ void setup() {
   onOff();
   currentTime = millis();
   loopTime = currentTime; 
-  //Serial.begin(9600);
-  //Serial.println("ir");
   My_Receiver.enableIRIn(); // Start the receiver
-  //Serial.println("wire");
   Wire.begin();
-  //Serial.println("initials");
   setInitials();
-//  setRadioFrequency();
- //Serial.println("Conf ended");
+  setRadioFrequency();
+}
+
+void drawLinearBar(int value, int maxi)
+{
+  lcd.setCursor(0, 1);
+  lcd.write(byte(6)); // arrow
+  // mamy 15 znaków na progress więc liczymy
+  byte chars = (int)((float)value/maxi*15);
+  byte rest = (int)(((float)value/maxi*15-chars)*5);
+  for (byte i=0; i<chars; i++)
+  {
+    lcd.write(byte(0));
+  }
+  if (rest == 0)
+    lcd.write(" ");
+  else if (rest == 1)
+    lcd.write(byte(2));
+  else if (rest == 2)
+    lcd.write(byte(3));
+  else if (rest == 3)
+    lcd.write(byte(4));
+  else if (rest == 4)
+    lcd.write(byte(5));
+  for (byte i = chars; i < 14; i++)
+  {
+    lcd.write(" ");
+  }
+}
+
+void drawBalanceBar(int value)
+{
+  lcd.setCursor(0, 1);
+  for (int i=-7; i<(value < 0 ? value : 0); i++)
+  {
+    lcd.write(" ");
+  }
+
+  for (int i=value; i<0; i++)
+  {
+    lcd.write(byte(0));
+  }
+  
+  lcd.write(byte(0)); // zero
+
+  for (int i=0; i<value; i++)
+  {
+    lcd.write(byte(0));
+  }
+
+  for (int i=(value < 0 ? 0 : value); i<7; i++)
+  {
+    lcd.write(" ");
+  }
+  
 }
 
 void setRadioFrequency()
 {
-//  radio.setFrequency((float)frequency/10.0);
-//  Serial.print("Set frequency to: ");
-//  Serial.println((float)frequency/10.0);
+  radio.setFrequency((float)frequency/10.0);
 }
 
 void setChannel()
 {
   Wire.beginTransmission(0x44);
-  Wire.write(91+activeChannel);
+  Wire.write(63+((3-gain)*8)+((1-loud)*4)+activeChannel);
   Wire.endTransmission();
 }
 
@@ -78,18 +212,12 @@ void setVolume()
 void setInitials()
 {
   Wire.beginTransmission(0x44);
-  //Wire.write(0x45); // input 2, 11.25db gain, loud mode off
   Wire.write(0x6F); // bass flat
   Wire.write(0x7F); // treb flat
-  //Wire.write(0xC0); // 0db attn RL
-  //Wire.write(0xE0); // 0db attn RR
-  //Wire.write(0x16); // vol atten to -40db
   Wire.write(128); // LF
   Wire.write(160); // RF
   Wire.write(192); // LR
   Wire.write(224); // RR
-  //Wire.write(103); // Bass
-  //Wire.write(119); // treble
   Wire.write(63-volume);
   Wire.write(91+activeChannel);
   Wire.endTransmission();
@@ -158,6 +286,69 @@ bool confirmPressed()
   }
 }
 
+void setTrebble()
+{
+  Wire.beginTransmission(0x44);
+  if (treb < 0)
+     Wire.write(112+7+treb);
+  else
+     Wire.write(112+15-treb);
+  Wire.endTransmission();
+}
+
+void setBass()
+{
+  Wire.beginTransmission(0x44);
+  if (bass < 0)
+     Wire.write(96+7+bass);
+  else
+     Wire.write(96+15-bass);
+  Wire.endTransmission();
+}
+
+void setBalance(int incr)
+{
+  if (balance < 0 || (balance == 0 && incr > 0))
+  {
+     lf += incr;
+     lr += incr;
+  }
+  else if (balance > 0 || (balance == 0 && incr < 0))
+  {
+     rf -= incr;
+     rr -= incr;
+  }
+  setAttenuators();
+}
+
+void setAttenuators()
+{
+  Wire.beginTransmission(0x44);
+  int tmp_lf = (lf < 0 ? 0 : lf);
+  int tmp_rf = (rf < 0 ? 0 : rf);
+  int tmp_lr = (lr < 0 ? 0 : lr);
+  int tmp_rr = (rr < 0 ? 0 : rr);  
+  Wire.write(128+31-tmp_lf);
+  Wire.write(160+31-tmp_rf);
+  Wire.write(192+31-tmp_lr);
+  Wire.write(224+31-tmp_rr);
+  Wire.endTransmission();
+}
+
+void setFader(int incr)
+{
+  if (fader < 0 || (fader == 0 && incr > 0))
+  {
+    lf += incr;
+    rf += incr;
+  }
+  else if (fader > 0 || (fader == 0 && incr < 0))
+  {
+     lr -= incr;
+     rr -= incr;
+  }
+  setAttenuators();
+}
 
 
 void loop() {
@@ -173,11 +364,9 @@ void loop() {
         lcd.print("TELEWIZJA       ");
       else if (activeChannel == 3)
         lcd.print("BLUETOOTH       ");
-        
-      lcd.setCursor(0, 1);
-      lcd.print("VOLUME: ");
-      lcd.print(volume);
-      lcd.print("     ");
+
+      drawLinearBar(volume, 63);
+      
       tmpValue = volume;
       readEncoder(volume, 1, 0, 63);
       if (volume != tmpValue)
@@ -197,7 +386,7 @@ void loop() {
       lcd.print("RADIO FREQUENCY ");
       lcd.setCursor(0, 1);
       lcd.print("                ");
-      readEncoder(menuLevel, 1, 1, 4);
+      readEncoder(menuLevel, 1, 1, MENU_POSITIONS);
       if (confirmPressed())
       {
         menuLevel = 11; // frequency
@@ -209,7 +398,7 @@ void loop() {
       lcd.print("BALANCE         ");
       lcd.setCursor(0, 1);
       lcd.print("                ");
-      readEncoder(menuLevel, 1, 1, 4);
+      readEncoder(menuLevel, 1, 1, MENU_POSITIONS);
       if (confirmPressed())
       {
         menuLevel = 21; // balance
@@ -218,10 +407,10 @@ void loop() {
     if (menuLevel == 3) // we are in the menu
     {
       lcd.setCursor(0, 0);
-      lcd.print("FADER           ");
+      lcd.print("FADER            ");
       lcd.setCursor(0, 1);
       lcd.print("                ");
-      readEncoder(menuLevel, 1, 1, 4);
+      readEncoder(menuLevel, 1, 1, MENU_POSITIONS);
       if (confirmPressed())
       {
         menuLevel = 31; // fader
@@ -230,15 +419,64 @@ void loop() {
     if (menuLevel == 4) // we are in the menu
     {
       lcd.setCursor(0, 0);
+      lcd.print("LOUDNESS            ");
+      lcd.setCursor(0, 1);
+      lcd.print("                ");
+      readEncoder(menuLevel, 1, 1, MENU_POSITIONS);
+      if (confirmPressed())
+      {
+        menuLevel = 41; // exit
+      }
+    }
+    if (menuLevel == 5) // we are in the menu
+    {
+      lcd.setCursor(0, 0);
+      lcd.print("GAIN            ");
+      lcd.setCursor(0, 1);
+      lcd.print("                ");
+      readEncoder(menuLevel, 1, 1, MENU_POSITIONS);
+      if (confirmPressed())
+      {
+        menuLevel = 51; // exit
+      }
+    }
+    if (menuLevel == 6) // we are in the menu
+    {
+      lcd.setCursor(0, 0);
+      lcd.print("BASS            ");
+      lcd.setCursor(0, 1);
+      lcd.print("                ");
+      readEncoder(menuLevel, 1, 1, MENU_POSITIONS);
+      if (confirmPressed())
+      {
+        menuLevel = 61; // exit
+      }
+    }        
+    if (menuLevel == 7) // we are in the menu
+    {
+      lcd.setCursor(0, 0);
+      lcd.print("TREBBLE            ");
+      lcd.setCursor(0, 1);
+      lcd.print("                ");
+      readEncoder(menuLevel, 1, 1, MENU_POSITIONS);
+      if (confirmPressed())
+      {
+        menuLevel = 71; // exit
+      }
+    }    
+    if (menuLevel == 8) // we are in the menu
+    {
+      lcd.setCursor(0, 0);
       lcd.print("EXIT            ");
       lcd.setCursor(0, 1);
       lcd.print("                ");
-      readEncoder(menuLevel, 1, 1, 4);
+      readEncoder(menuLevel, 1, 1, MENU_POSITIONS);
       if (confirmPressed())
       {
         menuLevel = 0; // exit
       }
     }
+    
     if (menuLevel == 11) // set the frequency
     {
       lcd.setCursor(0, 0);
@@ -256,7 +494,115 @@ void loop() {
       {
         menuLevel = 1; // frequency
       }
+    }   
+    
+    if (menuLevel == 21) // set balance
+    {
+      lcd.setCursor(0, 0);
+      lcd.print("BALANCE: ");
+      lcd.print(balance);
+      lcd.print("     ");
+      /*lcd.setCursor(0, 1);
+      lcd.print(balance);
+      lcd.print("           ");*/
+      drawBalanceBar((int)balance/4);
+      tmpValue = balance;
+      readEncoder(balance, 1, -31, 31);
+      if (tmpValue != balance)
+      {
+         setBalance(balance-tmpValue);
+      }
+      if (confirmPressed())
+      {
+        menuLevel = 2; // balance
+      }
     }    
+    if (menuLevel == 31) // set fader
+    {
+      lcd.setCursor(0, 0);
+      lcd.print("FADER: ");
+      lcd.print(fader);
+      lcd.print("       ");
+      drawBalanceBar((int)fader/4);
+      tmpValue = fader;
+      readEncoder(fader, 1, -31, 31);
+      if (tmpValue != fader)
+      {
+         setFader(fader-tmpValue);
+      }
+      if (confirmPressed())
+      {
+        menuLevel = 3; // fader
+      }
+    }       
+    if (menuLevel == 41) // set loudness
+    {
+      lcd.setCursor(0, 0);
+      lcd.print("LOUDNESS      ");
+      lcd.setCursor(0, 1);
+      lcd.print(loud == 0 ? "OFF" : "ON");
+      lcd.print("           ");
+      tmpValue = loud;
+      readEncoder(loud, 1, 0, 1);
+      if (tmpValue != loud)
+      {
+        setChannel();
+      }
+      if (confirmPressed())
+      {
+        menuLevel = 4; // loudness
+      }
+    }  
+    if (menuLevel == 51) // set gain
+    {
+      lcd.setCursor(0, 0);
+      lcd.print("GAIN      ");
+      lcd.setCursor(0, 1);
+      lcd.print(gain);
+      lcd.print("           ");
+      tmpValue = gain;
+      readEncoder(gain, 1, 0, 3);
+      if (tmpValue != gain)
+      {
+        setChannel();
+      }
+      if (confirmPressed())
+      {
+        menuLevel = 5; // balance
+      }
+    }    
+    if (menuLevel == 61) // set bass
+    {
+      lcd.setCursor(0, 0);
+      lcd.print("BASS      ");
+      drawBalanceBar(bass);
+      tmpValue = bass;
+      readEncoder(bass, 1, -7, 7);
+      if (tmpValue != bass)
+      {
+        setBass();
+      }
+      if (confirmPressed())
+      {
+        menuLevel = 6; // balance
+      }
+    } 
+    if (menuLevel == 71) // set trebble
+    {
+      lcd.setCursor(0, 0);
+      lcd.print("TREBBLE      ");
+      drawBalanceBar(treb);
+      tmpValue = treb;
+      readEncoder(treb, 1, -7, 7);
+      if (tmpValue != treb)
+      { 
+        setTrebble();
+      }
+      if (confirmPressed())
+      {
+        menuLevel = 7; // trebble
+      }
+    } 
   }
 
   if (My_Receiver.GetResults(&My_Decoder)) {
@@ -309,8 +655,6 @@ void loop() {
       }
 
     }
-
-    
 
     lastDecodedValue = My_Decoder.value;
 

@@ -165,6 +165,7 @@ void setup() {
   Serial.println(WiFi.localIP());
   pinMode(2,OUTPUT);
   server.begin();
+  irsend.begin();
 }
 
 void handleSettingsUpdate()

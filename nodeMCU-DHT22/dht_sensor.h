@@ -3,7 +3,7 @@
 
 #include "DHT.h"
 
-#define DHTPIN D7     // what digital pin we're connected to
+#define DHTPIN D4     // what digital pin we're connected to
 
 // Uncomment whatever type you're using!
 //#define DHTTYPE DHT11   // DHT 11
@@ -24,32 +24,39 @@
 DHT dht(DHTPIN, DHTTYPE);
 
 struct DHT_data {
-  float temp;
-  float hum;
+  float temp = 0;
+  float hum = 0;
 } DHT_readings;
 
 float dht_temp;
 
 void setup_dht() {
-  Serial.println("DHTxx test!");
-
   dht.begin();
 }
 
 void read_DHT() {
+  float temp = 0;
+  float hum = 0;
   // Reading temperature or humidity takes about 250 milliseconds!
   // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
-  DHT_readings.hum = dht.readHumidity();
+  hum = dht.readHumidity();
   // Read temperature as Celsius (the default)
-  DHT_readings.temp = dht.readTemperature();
+  temp = dht.readTemperature();
+
+//  Serial.print("Temp: ");
+//  Serial.print(temp);
+//  Serial.print("Hum: ");
+//  Serial.println(hum);
 
   // Check if any reads failed and exit early (to try again).
-  if (isnan(DHT_readings.hum) || isnan(DHT_readings.temp) ) {
-    Serial.println("Failed to read from DHT sensor!");
-    DHT_readings.temp = -90;
-    DHT_readings.hum = -10;
+  if (isnan(hum) || isnan(temp) ) {
+//    Serial.println("Failed to read from DHT sensor!");
     return;
   }
 
+//  Serial.println("Reading OK");
+
+  DHT_readings.hum = hum;
+  DHT_readings.temp = temp;
 }
 

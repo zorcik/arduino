@@ -78,7 +78,7 @@ const uint16_t kCaptureBufferSize = 1024;
 const uint8_t kTimeout = 50;
 #else   // DECODE_AC
 // Suits most messages, while not swallowing many repeats.
-const uint8_t kTimeout = 15;
+const uint8_t kTimeout = 50;
 #endif  // DECODE_AC
 // Alternatives:
 // const uint8_t kTimeout = 90;

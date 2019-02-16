@@ -8,8 +8,11 @@
 #include <CayenneMQTTESP8266.h>
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
+#include <WebSocketsServer.h>
 
 ESP8266WebServer server;
+WebSocketsServer webSocket = WebSocketsServer(81);
+
 uint8_t pin_led = 2;
 char* ssid = ""; //not used
 char* password = "";
@@ -70,6 +73,21 @@ function myFunction()
 </script>
 </html>
 )=====";
+
+// kody pilota cyfrowego polsatu
+uint16_t power[77] = {4640, 4376,  652, 376,  624, 376,  624, 376,  624, 374,  624, 1348,  652, 1348,  652, 376,  624, 374,  624, 1348,  652, 376,  624, 1348,  652, 1348,  652, 376,  624, 374,  624, 376,  624, 376,  624, 4384,  652, 376,  624, 376,  624, 376,  624, 374,  624, 376,  624, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 376,  624, 376,  624, 376,  624, 1348,  652, 376,  624, 376,  624, 376,  624, 376,  624, 1348,  652, 1348,  652, 1348,  652};  // UNKNOWN 446117B3
+uint16_t pplus[77] = {4638, 4378,  652, 376,  622, 376,  624, 374,  624, 376,  624, 1348,  652, 1348,  652, 376,  624, 376,  624, 1348,  652, 376,  624, 1348,  652, 1348,  652, 376,  624, 376,  624, 374,  624, 376,  624, 4382,  652, 378,  622, 376,  624, 376,  624, 376,  624, 376,  624, 376,  624, 376,  624, 376,  624, 376,  624, 1348,  652, 1348,  652, 376,  624, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 376,  624, 376,  624, 1348,  652};  // UNKNOWN 88617E93
+uint16_t pminus[77] = {4638, 4376,  652, 376,  624, 374,  624, 376,  624, 374,  624, 1348,  652, 1348,  652, 376,  624, 376,  624, 1348,  652, 374,  624, 1348,  652, 1348,  652, 376,  624, 374,  624, 376,  624, 376,  624, 4384,  650, 376,  624, 376,  624, 376,  624, 374,  624, 1348,  652, 376,  624, 376,  624, 376,  624, 376,  624, 1350,  650, 1350,  650, 376,  624, 376,  624, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 376,  624, 376,  624, 1348,  652};  // UNKNOWN 7516EE95
+uint16_t one[77] = {4638, 4376,  652, 376,  624, 374,  626, 374,  626, 374,  626, 1348,  652, 1348,  652, 374,  626, 374,  626, 1348,  652, 374,  626, 1346,  654, 1348,  652, 374,  624, 374,  626, 374,  626, 374,  626, 4382,  652, 376,  624, 374,  626, 374,  626, 374,  626, 374,  626, 374,  626, 374,  626, 374,  626, 374,  626, 374,  626, 374,  626, 374,  626, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 1348,  652};  // UNKNOWN 4863A6FB
+uint16_t two[77] = {4640, 4378,  650, 376,  624, 374,  626, 374,  626, 374,  626, 1348,  652, 1348,  652, 374,  626, 374,  626, 1348,  652, 374,  626, 1346,  654, 1348,  652, 374,  624, 374,  626, 374,  626, 374,  626, 4382,  652, 376,  624, 374,  626, 374,  626, 374,  626, 1346,  654, 374,  624, 374,  626, 374,  626, 374,  626, 374,  626, 374,  626, 374,  626, 374,  626, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 1348,  652, 1348,  652};  // UNKNOWN BC282835
+
+
+
+
+
+
+
+
 
 
 IRsend irsend(4); // An IR LED is controlled by GPIO pin 4 (D2)
@@ -139,7 +157,10 @@ void setup() {
   server.on("/toggle",toggleLED);
   server.on("/settings", HTTP_POST, handleSettingsUpdate);
   server.on("/update", handleOTAUpdate);
-  
+  server.on("/sendDenon", sendDenonCode);
+  server.on("/sendNec", sendNECCode);
+  server.on("/sendPolsat", sendPolsatCode);
+
   ArduinoOTA.setPassword((const char *)"Jacek1");
 
   ArduinoOTA.onStart([]() {
@@ -166,7 +187,75 @@ void setup() {
   pinMode(2,OUTPUT);
   server.begin();
   irsend.begin();
+  webSocket.begin();                          // start the websocket server
+  webSocket.onEvent(webSocketEvent);
 }
+
+void sendDenonCode() {
+ for (uint8_t i = 0; i < server.args(); i++) {
+    if (server.argName(i) == "code") {
+      uint32_t code = strtoul(server.arg(i).c_str(), NULL, 10);
+      switch(code)
+      {
+        case 1 : irsend.sendDenon(0x2A4C02840086, 48);
+          break;
+        case 2 : irsend.sendDenon(0x2A4C028C008E, 48);
+          break;
+        case 3 : irsend.sendDenon(0x2A4C028248C8, 48);
+          break;
+        case 4 : irsend.sendDenon(0x2A4C028A48C0, 48);
+          break;
+        case 5 : irsend.sendDenon(0x2A4C028F34B9, 48);
+          break;
+        case 6 : irsend.sendDenon(0x2A4C0280E86A, 48);
+          break;
+        case 7 : irsend.sendDenon(0x2A4C0288E862, 48);
+          break;
+        case 8 : irsend.sendDenon(0x2A4C02833CBD, 48);
+          break;
+        case 9 : irsend.sendDenon(0x2A4C028B3CB5, 48);
+          break;
+        default:
+          irsend.sendDenon(code, 32);
+      }
+    }
+  }
+  server.send(200, "application/json", "{\"status\" : \"ok\"}");
+}
+
+void sendNECCode() {
+ for (uint8_t i = 0; i < server.args(); i++) {
+    if (server.argName(i) == "code") {
+      uint32_t code = strtoul(server.arg(i).c_str(), NULL, 16);
+      irsend.sendNEC(code, 32);
+    }
+  }
+  server.send(200, "application/json", "{\"status\" : \"ok\"}");
+}
+
+void sendPolsatCode() {
+  for (uint8_t i = 0; i < server.args(); i++) {
+    if (server.argName(i) == "code") {
+      uint32_t code = strtoul(server.arg(i).c_str(), NULL, 10);
+      switch(code)
+      {
+        case 1 : irsend.sendRaw(power, 77, 38);
+          break;
+        case 2 : irsend.sendRaw(pplus, 77, 38);
+          break;
+        case 3 : irsend.sendRaw(pminus, 77, 38);
+          break;
+        case 4 : irsend.sendRaw(one, 77, 38);
+          break;
+        case 5 : irsend.sendRaw(two, 77, 38);
+          break;
+      }
+    }
+  }
+  server.send(200, "application/json", "{\"status\" : \"ok\"}");
+}
+
+
 
 void handleSettingsUpdate()
 {
@@ -206,6 +295,7 @@ void loop() {
 
   server.handleClient();
   Cayenne.loop();
+  webSocket.loop();
 }
 
 void toggleLED()
@@ -250,5 +340,55 @@ CAYENNE_IN(8) { // CH+
 }
 CAYENNE_IN(9) { // CH-
     irsend.sendDenon(0x2A4C028B3CB5, 48);
+}
+
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght) { // When a WebSocket message is received
+  if (type != WStype_TEXT)
+  {
+    return;
+  }
+  int command = (int)payload[0] - '0';
+
+  switch (command)
+  {
+    case 0: irsend.sendDenon(0x2A4C028C008E, 48); //OFF
+      break;
+    case 1: irsend.sendDenon(0x2A4C02840086, 48); //ON
+      break;
+    case 2: irsend.sendDenon(0x2A4C0280A82A, 48); //SURR+
+      break;
+    case 3: irsend.sendDenon(0x2A4C028248C8, 48); //QS1
+      break;
+    case 4: irsend.sendDenon(0x2A4C028A48C0, 48); //QS2
+      break;
+    case 5: irsend.sendDenon(0x2A4C028F34B9, 48); //TUNER
+      break;
+    case 6: irsend.sendDenon(0x2A4C0280E86A, 48); //VOL+
+      break;
+    case 7: irsend.sendDenon(0x2A4C0288E862, 48); //VOL-
+      break;
+    case 8: irsend.sendDenon(0x2A4C0280E86A, 48); //CH+
+      break;
+    case 9: irsend.sendDenon(0x2A4C0288E862, 48); //CH-
+      break;
+    // pilot do rzutnika  
+    case 17: irsend.sendNEC(0x4CB340BF, 32); //ON // A
+      break;
+    case 18: irsend.sendNEC(0x4CB3748B, 32); //OFF // B
+      break;
+
+    // pilot polsatu
+    case 19 : irsend.sendRaw(power, 77, 38);
+          break;
+    case 20 : irsend.sendRaw(pplus, 77, 38);
+          break;
+    case 21 : irsend.sendRaw(pminus, 77, 38);
+          break;
+    case 22 : irsend.sendRaw(one, 77, 38);
+          break;
+    case 23 : irsend.sendRaw(two, 77, 38);
+          break;
+  }
+  
 }
 

@@ -1,28 +1,34 @@
-#include "ESP8266WiFi.h"
+#include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+#include <ESP8266WebServer.h>
 #include <WebSocketsServer.h>
 
 const char* ssid = "zort";
 const char* password = "jacek12345";
  
-//WiFiServer wifiServer(80);
 WebSocketsServer webSocket(81);
+ESP8266WebServer server;
+bool ota_flag = false;
+uint16_t time_elapsed = 0;
 
 void processReceivedValue(char command){
  
   if(command == '1')
   { 
-    digitalWrite(D0, HIGH); 
+    digitalWrite(D2, HIGH); 
     digitalWrite(D1, LOW); 
   }
   else if(command == '0')
   { 
-    digitalWrite(D0, LOW);
+    digitalWrite(D2, LOW);
     digitalWrite(D1, LOW); 
   }
   else if(command == '2')
   { 
     digitalWrite(D1, HIGH);
-    digitalWrite(D0, LOW); 
+    digitalWrite(D2, LOW); 
   }
  
   return;
@@ -36,20 +42,16 @@ void startWebSocket() { // Start a WebSocket server
 
 void setup() {
   // put your setup code here, to run once:
-  pinMode(D0, OUTPUT);
+  pinMode(D2, OUTPUT);
   pinMode(D1, OUTPUT);
-  digitalWrite(D0, LOW);
+  digitalWrite(D2, LOW);
   digitalWrite(D1, LOW);
   Serial.begin(115200);
  
   delay(1000);
 
-  //WiFi.mode(WIFI_STA);
+  WiFi.hostname("ESP_rolety");
   WiFi.begin(ssid, password);
-  //IPAddress ip(192,168,1,242);   
-  //IPAddress gateway(192,168,1,1);   
-  //IPAddress subnet(255,255,255,0);   
-  //WiFi.config(ip, gateway, subnet);
  
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
@@ -58,35 +60,36 @@ void setup() {
  
   Serial.print("Connected to WiFi. IP:");
   Serial.println(WiFi.localIP());
- 
-  //wifiServer.begin();
+
+  ArduinoOTA.setPassword((const char *)"Jacek1");
+  ArduinoOTA.begin();
   startWebSocket();
+  server.on("/update", handleOTAUpdate);
+  server.begin();
+}
+
+void handleOTAUpdate()
+{
+  ota_flag = true;
+  server.send(200, "text/plain", "You can upload the sketch for 30 seconds!");
+  time_elapsed = 0;
 }
 
 void loop() {
-  /*
-  WiFiClient client = wifiServer.available();
- 
-  if (client) {
- 
-    while (client.connected()) {
- 
-      while (client.available()>0) {
-        char c = client.read();
-        processReceivedValue(c);
-        Serial.write(c);
-      }
- 
+  if (ota_flag)
+  {
+    uint16_t time_start = millis();
+    while(time_elapsed < 30000)
+    {
+      ArduinoOTA.handle();
+      time_elapsed = millis()-time_start;  
       delay(10);
     }
- 
-    client.stop();
-    Serial.println("Client disconnected");
- 
+    ota_flag = false;
   }
-  */
+
+  server.handleClient();  
   webSocket.loop();
-  
 }
 
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght) { // When a WebSocket message is received

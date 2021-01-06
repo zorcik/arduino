@@ -3,20 +3,29 @@
 #define OLED_RESET 4
 Adafruit_SSD1306 display(OLED_RESET);
 
-int stp = 13;  // STEP
-int dir = 12;  // KIERUNEK
+int stp = A0;  // STEP
+int dir = 13;  // KIERUNEK
+int enable = A1; // ENABLE
 
-int timeMin = 8;
-int timePlus = 9;
-int photosMin = 10;
-int photosPlus = 11;
+int timeMin = 10;
+int timePlus = 6;
+int photosMin = 9;
+int photosPlus = 8;
 int buttonStart = 7;
-int zeroTest = 6;
+int zeroTest = 5;
+int photoSwitch = 4;
 
 void setup() {
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   pinMode(stp, OUTPUT);
   pinMode(dir, OUTPUT);   
+  pinMode(enable, OUTPUT);   
+  pinMode(photoSwitch, OUTPUT);
+
+  digitalWrite(enable, LOW);
+  digitalWrite(photoSwitch, LOW);
+  digitalWrite(stp, LOW);
+  digitalWrite(dir, LOW);
 
   pinMode(timeMin, INPUT);
   pinMode(timePlus, INPUT);
@@ -28,21 +37,19 @@ void setup() {
 
 bool inProgress = false;
 bool rewinding = false;
-int maxSteps = 10000;
+long maxSteps = 10000;
 int calculatedDelay = 0;
 int setSeconds = 3600;
 int photos = 720;
-int currentStep = 0;
-int steps = 0;
-int counter = 0;
-int DIR = 0;
+long currentStep = 0;
+long steps = 0;
+long counter = 0;
 
 void start() {
   // liczymy opóźnienia
   calculatedDelay = setSeconds * 1000 / maxSteps;
   steps = maxSteps / photos;
   counter = 0;
-  DIR = 0;
   inProgress = true;
 }
 
@@ -87,17 +94,24 @@ void redrawLCD() {
 
 void makeStep() {
   digitalWrite(stp, HIGH);
-  delay(1);
+  delay(5);
   digitalWrite(stp, LOW);
-  delay(1);
+  delay(5);
+}
+
+void takePhoto() {
+  digitalWrite(photoSwitch, HIGH);
+  delay(100);
+  digitalWrite(photoSwitch, LOW);
 }
 
 void progressLoop() {
+  digitalWrite(dir, LOW);  
   makeStep();
   delay(calculatedDelay/2);
   if (++counter == steps)
   {
-    // takePhoto();
+    takePhoto();
     counter = 0;
   }
   delay(calculatedDelay/2);
@@ -116,7 +130,7 @@ void progressLoop() {
 }
 
 void rewindingLoop() {
-  DIR = 1;
+  digitalWrite(dir, HIGH);
   while (digitalRead(zeroTest) == LOW)
   {
     makeStep();

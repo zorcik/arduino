@@ -15,7 +15,7 @@ PubSubClient client(espClient);
 
 void setup() {
   // put your setup code here, to run once:
-  WiFi.hostname("ESP_SWITCH1");
+  WiFi.hostname("ESP_SWITCH4");
   pinMode(D0, OUTPUT);
   pinMode(D5, OUTPUT);
   pinMode(D1, INPUT_PULLUP);
@@ -53,6 +53,34 @@ void callback(char* topic, byte* payload, unsigned int length) {
      digitalWrite(D5, LOW);
   if (receivedChar == '3')
      digitalWrite(D5, HIGH);
+  if (receivedChar == '4') // sprawdzanie
+  {
+     // 5 - D0 = 0, 
+     // 6 = D0 = 1
+     // 7 = D5 = 0
+     // 8 = D5 = 1
+     String ret = "";
+     if (digitalRead(D0) == HIGH)
+     {
+      ret = "6";
+     }
+     else
+     {
+      ret = "5";
+     }
+     
+     if (digitalRead(D5) == HIGH)
+     {
+      ret = ret+"8";
+     }
+     else
+     {
+      ret = ret +"7";
+     }
+     char ch[3];
+     ret.toCharArray(ch, 3);
+     client.publish("homesw4in", ch);
+  }
   if (receivedChar == '9')
      handleOTAUpdate();
   }
@@ -64,10 +92,10 @@ void reconnect() {
  while (!client.connected()) {
  Serial.print("Attempting MQTT connection...");
  // Attempt to connect
- if (client.connect("ESP_Switch1", mqtt_user, mqtt_pass)) {
+ if (client.connect("ESP_Switch4", mqtt_user, mqtt_pass)) {
   Serial.println("connected");
   // ... and subscribe to topic
-  client.subscribe("homesw1in");
+  client.subscribe("homesw4in");
  } else {
   Serial.print("failed, rc=");
   Serial.print(client.state());

@@ -37,7 +37,7 @@ void processReceivedValue(char command){
 void startWebSocket() { // Start a WebSocket server
   webSocket.begin();                          // start the websocket server
   webSocket.onEvent(webSocketEvent);          // if there's an incomming websocket message, go to function 'webSocketEvent'
-  Serial.println("WebSocket server started.");
+//  Serial.println("WebSocket server started.");
 }
 
 void setup() {
@@ -46,7 +46,7 @@ void setup() {
   pinMode(D1, OUTPUT);
   digitalWrite(D2, LOW);
   digitalWrite(D1, LOW);
-  Serial.begin(115200);
+//  Serial.begin(115200);
  
   delay(1000);
 
@@ -55,23 +55,29 @@ void setup() {
  
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
-    Serial.println("Connecting..");
+//    Serial.println("Connecting..");
   }
  
-  Serial.print("Connected to WiFi. IP:");
-  Serial.println(WiFi.localIP());
+//  Serial.print("Connected to WiFi. IP:");
+//  Serial.println(WiFi.localIP());
 
   ArduinoOTA.setPassword((const char *)"Jacek1");
   ArduinoOTA.begin();
   startWebSocket();
   server.on("/update", handleOTAUpdate);
+  server.on("/restart", rebootESP);
   server.begin();
+}
+
+void rebootESP()
+{
+  ESP.restart();
 }
 
 void handleOTAUpdate()
 {
   ota_flag = true;
-  server.send(200, "text/plain", "You can upload the sketch for 30 seconds!");
+  server.send(200, "text/plain", "You can upload the sketch for 60 seconds!");
   time_elapsed = 0;
 }
 
@@ -79,7 +85,7 @@ void loop() {
   if (ota_flag)
   {
     uint16_t time_start = millis();
-    while(time_elapsed < 30000)
+    while(time_elapsed < 60000)
     {
       ArduinoOTA.handle();
       time_elapsed = millis()-time_start;  
@@ -95,15 +101,15 @@ void loop() {
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght) { // When a WebSocket message is received
   switch (type) {
     case WStype_DISCONNECTED:             // if the websocket is disconnected
-      Serial.printf("[%u] Disconnected!\n", num);
+      //Serial.printf("[%u] Disconnected!\n", num);
       break;
     case WStype_CONNECTED: {              // if a new websocket connection is established
         IPAddress ip = webSocket.remoteIP(num);
-        Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
+        //Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
       }
       break;
     case WStype_TEXT:                     // if new text data is received
-      Serial.printf("[%u] get Text: %s\n", num, payload);
+      //Serial.printf("[%u] get Text: %s\n", num, payload);
       processReceivedValue(payload[0]);
       break;
   }

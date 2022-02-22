@@ -19,6 +19,12 @@ void setup() {
     pinMode(9, INPUT_PULLUP);
     pinMode(10, INPUT_PULLUP);
 
+    pinMode(UP_RELAY, OUTPUT);
+    pinMode(DOWN_RELAY, OUTPUT);
+
+    digitalWrite(UP_RELAY, LOW);
+    digitalWrite(DOWN_RELAY, LOW);
+
     upButton.attach(A2, INPUT);
     upButton.interval(25);
     downButton.attach(A3, INPUT);

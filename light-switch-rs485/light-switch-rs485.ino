@@ -41,13 +41,14 @@ void setup() {
     in.pinMode(6, INPUT);
     in.pinMode(7, INPUT);
 
-    in.enableInterrupt(2, onInterrupt);
+    in.enableInterrupt(2, onInterrupt, RISING);
 }
 
 void onInterrupt() {
     state = in.read();
 }
 
+bit tempState = 0;
 
 void loop() {
 
@@ -56,7 +57,11 @@ void loop() {
         lastState = state;
         for (int i=0; i<8; i++)
         {
-            bitWrite(outPins, i, abs(bitRead(outPins, i)-bitRead(state, i)));
+            tempState = bitRead(state, i);
+            if (tempState == HIGH)
+            {
+                bitWrite(outPins, i, abs(bitRead(outPins, i)-1));
+            }
         }
 
         modbusData[0] = outPins;

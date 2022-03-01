@@ -6,7 +6,7 @@ Modbus slave;
 
 uint16_t modbusData[2];
 int address = 50;
-uint8_t outPins = 0b00000000;
+uint8_t outPins = 0b11111111;
 
 PCF8574 out;
 PCF8574 in;
@@ -14,8 +14,8 @@ PCF8574 in;
 uint8_t state = 0;
 uint8_t lastState = 0;
 
-
-void setup() {
+void setup()
+{
     slave = Modbus(ID, Serial, 3);
     slave.begin(9600);
 
@@ -41,26 +41,31 @@ void setup() {
     in.pinMode(6, INPUT);
     in.pinMode(7, INPUT);
 
-    in.enableInterrupt(2, onInterrupt, FALLING);
+    in.enableInterrupt(2, onInterrupt);
+    in.attachInterrupt(0, onPin0, FALLING);
 }
 
-void onInterrupt() {
+void onInterrupt()
+{
+    in.checkForInterrupt();
+}
+
+void onPin0()
+{
     state = in.read();
 }
 
-bit tempState = 0;
-
-void loop() {
+void loop()
+{
 
     if (state != lastState)
     {
         lastState = state;
-        for (int i=0; i<8; i++)
+        for (int i = 0; i < 8; i++)
         {
-            tempState = bitRead(state, i);
-            if (tempState == HIGH)
+            if (bitRead(state, i) == LOW)
             {
-                bitWrite(outPins, i, abs(bitRead(outPins, i)-1));
+                bitWrite(outPins, i, abs(bitRead(outPins, i) - 1));
             }
         }
 
@@ -75,5 +80,5 @@ void loop() {
     }
 
     modbusData[1] = slave.getInCnt();
-    state = slave.poll( modbusData, 2);
+    state = slave.poll(modbusData, 2);
 }

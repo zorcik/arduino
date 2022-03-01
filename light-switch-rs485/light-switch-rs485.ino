@@ -42,15 +42,9 @@ void setup()
     in.pinMode(7, INPUT);
 
     in.enableInterrupt(2, onInterrupt);
-    in.attachInterrupt(0, onPin0, FALLING);
 }
 
 void onInterrupt()
-{
-    in.checkForInterrupt();
-}
-
-void onPin0()
 {
     state = in.read();
 }

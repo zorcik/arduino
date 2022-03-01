@@ -41,7 +41,7 @@ void setup() {
     in.pinMode(6, INPUT);
     in.pinMode(7, INPUT);
 
-    in.enableInterrupt(2, onInterrupt, RISING);
+    in.enableInterrupt(2, onInterrupt, FALLING);
 }
 
 void onInterrupt() {

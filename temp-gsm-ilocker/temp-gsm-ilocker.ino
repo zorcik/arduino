@@ -33,9 +33,8 @@ const char gprsPass[] = "";
 // SIM card PIN (leave empty, if not defined)
 const char simPIN[] = "";
 
-#include <ArduinoJson.h>
-#include <Wire.h>
 #include <TinyGsmClient.h>
+#include <ArduinoHttpClient.h>
 
 #ifdef DUMP_AT_COMMANDS
 #include <StreamDebugger.h>
@@ -60,9 +59,11 @@ long lastMsg = 0;
 float temperature = 0;
 float humidity = 0;
 const char server[] = "thingspeak.com"; // domain name: example.com, maker.ifttt.com, etc
-const char resource[] = "http://api.thingspeak.com/update?api_key=U1A8KSB0C07LHYPQ";
-const int port = 80; // server port number
+const char resource[] = "https://api.thingspeak.com/update?";
+const int port = 443; // server port number
 String apiKeyValue = "U1A8KSB0C07LHYPQ";
+
+HttpClient http(client, server, port);
 
 void litLED(int led)
 {
@@ -142,71 +143,101 @@ void loop()
     {
         SerialMon.println(" OK");
 
-        SerialMon.print("Connecting to ");
-        SerialMon.print(server);
-        if (!client.connect(server, port))
+        //        SerialMon.print("Connecting to ");
+        //        SerialMon.print(server);
+        //        if (!client.connect(server, port))
+        //        {
+        //            SerialMon.println(" fail");
+        //        }
+        //        else
+        //{
+        //            SerialMon.println(" OK");
+
+        // Reading temperature or humidity takes about 250 milliseconds!
+        // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+        humidity = dht.readHumidity();
+        // Read temperature as Celsius (the default)
+        temperature = dht.readTemperature();
+
+        // Check if any reads failed and exit early (to try again).
+        if (isnan(humidity) || isnan(temperature))
         {
-            SerialMon.println(" fail");
+            Serial.println(F("Failed to read from DHT sensor!"));
+            return;
         }
-        else
+
+        char tempString[8];
+        dtostrf(temperature, 1, 2, tempString);
+        Serial.print("Temperature: ");
+        Serial.println(tempString);
+        // Convert the value to a char array
+        char humString[8];
+        dtostrf(humidity, 1, 2, humString);
+        Serial.print("Humidity: ");
+        Serial.println(humString);
+        // Making an HTTP POST request
+        SerialMon.println("Performing HTTP GET request...");
+        // Prepare your HTTP POST request data (Temperature in Celsius degrees)
+        String httpRequestData = "api_key=" + apiKeyValue + "&field1=" + String(temperature) + "&field2=" + String(humidity) + "";
+
+        SerialMon.print(F("Performing HTTPS GET request... "));
+        http.connectionKeepAlive(); // Currently, this is needed for HTTPS
+        int err = http.get(resource + httpRequestData);
+        if (err != 0)
         {
-            SerialMon.println(" OK");
-
-            // Reading temperature or humidity takes about 250 milliseconds!
-            // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
-            humidity = dht.readHumidity();
-            // Read temperature as Celsius (the default)
-            temperature = dht.readTemperature();
-
-            // Check if any reads failed and exit early (to try again).
-            if (isnan(humidity) || isnan(temperature))
-            {
-                Serial.println(F("Failed to read from DHT sensor!"));
-                return;
-            }
-
-            char tempString[8];
-            dtostrf(temperature, 1, 2, tempString);
-            Serial.print("Temperature: ");
-            Serial.println(tempString);
-            // Convert the value to a char array
-            char humString[8];
-            dtostrf(humidity, 1, 2, humString);
-            Serial.print("Humidity: ");
-            Serial.println(humString);
-            // Making an HTTP POST request
-            SerialMon.println("Performing HTTP POST request...");
-            // Prepare your HTTP POST request data (Temperature in Celsius degrees)
-            String httpRequestData = "api_key=" + apiKeyValue + "&field1=" + String(dht.readTemperature()) + "&field2=" + String(dht.readHumidity()) + "";
-
-            client.print(String("POST ") + resource + " HTTP/1.1\r\n");
-            client.print(String("Host: ") + server + "\r\n");
-            client.println("Connection: close");
-            client.println("Content-Type: application/x-www-form-urlencoded");
-            client.print("Content-Length: ");
-            client.println(httpRequestData.length());
-            client.println();
-            client.println(httpRequestData);
-
-            unsigned long timeout = millis();
-            while (client.connected() && millis() - timeout < 10000L)
-            {
-                // Print available data (HTTP response from server)
-                while (client.available())
-                {
-                    char c = client.read();
-                    SerialMon.print(c);
-                    timeout = millis();
-                }
-            }
-            SerialMon.println();
-
-            // Close client and disconnect
-            client.stop();
-            SerialMon.println(F("Server disconnected"));
-            modem.gprsDisconnect();
-            SerialMon.println(F("GPRS disconnected"));
+            SerialMon.println(F("failed to connect"));
+            delay(10000);
+            return;
         }
+
+        String body = http.responseBody();
+        SerialMon.println(F("Response:"));
+        SerialMon.println(body);
+
+        SerialMon.print(F("Body length is: "));
+        SerialMon.println(body.length());
+
+        // Shutdown
+
+        http.stop();
+        SerialMon.println(F("Server disconnected"));
+        /*
+                    client.println("GET "+String(resource)+httpRequestData+" HTTP/1.0");
+                    client.println("Host: "+String(server));
+                    client.println("Connection: close");
+                    client.println();
+        */
+        /*
+                    client.print(String("POST ") + resource + " HTTP/1.1\r\n");
+                    client.print(String("Host: ") + server + "\r\n");
+                    client.println("Connection: close");
+                    client.println("Content-Type: application/x-www-form-urlencoded");
+                    client.print("Content-Length: ");
+                    client.println(httpRequestData.length());
+                    client.println();
+                    client.println(httpRequestData);
+        */
+        /*
+                    unsigned long timeout = millis();
+                    while (client.connected() && millis() - timeout < 10000L)
+                    {
+                        // Print available data (HTTP response from server)
+                        while (client.available())
+                        {
+                            char c = client.read();
+                            SerialMon.print(c);
+                            timeout = millis();
+                        }
+                    }
+                    SerialMon.println();
+
+                    // Close client and disconnect
+                    client.stop();
+                    SerialMon.println(F("Server disconnected"));
+        */
+        modem.gprsDisconnect();
+        SerialMon.println(F("GPRS disconnected"));
+        //}
     }
 
     delay(30000);

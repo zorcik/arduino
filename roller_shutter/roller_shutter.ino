@@ -37,7 +37,7 @@ void setup() {
 
     address += 10;
 
-    slave = Modbus(ID, Serial, 2);
+    slave = Modbus(address, Serial, 2);
     slave.begin(9600);
 }
 

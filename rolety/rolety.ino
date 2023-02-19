@@ -37,7 +37,7 @@ void processReceivedValue(char command){
 void startWebSocket() { // Start a WebSocket server
   webSocket.begin();                          // start the websocket server
   webSocket.onEvent(webSocketEvent);          // if there's an incomming websocket message, go to function 'webSocketEvent'
-//  Serial.println("WebSocket server started.");
+  //Serial.println("WebSocket server started.");
 }
 
 void setup() {
@@ -46,7 +46,7 @@ void setup() {
   pinMode(D1, OUTPUT);
   digitalWrite(D2, LOW);
   digitalWrite(D1, LOW);
-//  Serial.begin(115200);
+  //Serial.begin(115200);
  
   delay(1000);
 
@@ -55,11 +55,11 @@ void setup() {
  
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
-//    Serial.println("Connecting..");
+    //Serial.println("Connecting..");
   }
  
-//  Serial.print("Connected to WiFi. IP:");
-//  Serial.println(WiFi.localIP());
+  //Serial.print("Connected to WiFi. IP:");
+  //Serial.println(WiFi.localIP());
 
   ArduinoOTA.setPassword((const char *)"Jacek1");
   ArduinoOTA.begin();

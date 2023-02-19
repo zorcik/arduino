@@ -16,21 +16,12 @@ uint8_t lastState = 0;
 
 void setup()
 {
-    slave = Modbus(ID, Serial, 3);
-    slave.begin(9600);
+//    slave = Modbus(ID, Serial, 3);
+//    slave.begin(9600);
 
-    out.begin(0x20);
-    in.begin(0x27);
-
-    out.pinMode(0, OUTPUT);
-    out.pinMode(1, OUTPUT);
-    out.pinMode(2, OUTPUT);
-    out.pinMode(3, OUTPUT);
-    out.pinMode(4, OUTPUT);
-    out.pinMode(5, OUTPUT);
-    out.pinMode(6, OUTPUT);
-    out.pinMode(7, OUTPUT);
-    out.clear();
+    out.begin(0x20, false);
+    in.begin(0x27, false);
+    out.write(255);
 
     in.pinMode(0, INPUT);
     in.pinMode(1, INPUT);
@@ -41,7 +32,9 @@ void setup()
     in.pinMode(6, INPUT);
     in.pinMode(7, INPUT);
 
-    in.enableInterrupt(2, onInterrupt);
+    in.write(255);
+
+    //in.enableInterrupt(2, onInterrupt);
 }
 
 void onInterrupt()
@@ -51,7 +44,7 @@ void onInterrupt()
 
 void loop()
 {
-
+    //state = in.read();
     if (state != lastState)
     {
         lastState = state;
@@ -63,10 +56,12 @@ void loop()
             }
         }
 
-        modbusData[0] = outPins;
+      //  modbusData[0] = outPins;
         out.write(outPins);
     }
 
+    state = in.read();
+/*
     if (modbusData[0] != outPins)
     {
         outPins = modbusData[0];
@@ -74,5 +69,5 @@ void loop()
     }
 
     modbusData[1] = slave.getInCnt();
-    state = slave.poll(modbusData, 2);
+    state = slave.poll(modbusData, 2); */
 }

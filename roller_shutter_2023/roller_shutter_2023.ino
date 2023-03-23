@@ -63,10 +63,13 @@ bool modbusChanged = false;
 
 unsigned long lastCheckTime = 0;
 
+int state = 0;
+
 void stop()
 {
     digitalWrite(UP_RELAY, 0);
     digitalWrite(DOWN_RELAY, 0);
+    state = 0;
 }
 
 void goUP()
@@ -74,6 +77,7 @@ void goUP()
     digitalWrite(DOWN_RELAY, 0);
     delay(10);
     digitalWrite(UP_RELAY, 1);
+    state = 1;
 }
 
 void goDOWN()
@@ -81,6 +85,7 @@ void goDOWN()
     digitalWrite(UP_RELAY, 0);
     delay(10);
     digitalWrite(DOWN_RELAY, 1);
+    state = 3;
 }
 
 //state_opening: 1
@@ -88,7 +93,7 @@ void goDOWN()
 //state_closing: 3
 //state_closed: 4
 
-int state = 2;
+
 
 void loop()
 {
@@ -98,7 +103,7 @@ void loop()
         stop();
         if (lastDirection == 0)
         {
-            state = 0;
+            state = 2;
         }
         else
         {
@@ -121,27 +126,22 @@ void loop()
 
     if (modbusChanged && modbusData[0] == 2)
     {
-        down = LOW;
-        up = HIGH;
+        goUP();
         autoMove = true;
         lastCheckTime = millis();
-        state = 1;
     }
 
     if (modbusChanged && modbusData[0] == 0)
     {
-        down = LOW;
-        up = LOW;
+        stop();
         autoMove = false;
     }
 
     if (modbusChanged && modbusData[0] == 4)
     {
-        down = HIGH;
-        up = LOW;
+        goDOWN();
         autoMove = true;
         lastCheckTime = millis();
-        state = 3;
     }
 
     if (down == LOW && up == LOW)
@@ -168,12 +168,28 @@ void loop()
 
     if (down == LOW && up == HIGH)
     {
-        goDOWN();
+        if (autoMove)
+        {
+            stop();
+            autoMove = false;
+        }
+        else
+        {
+            goDOWN();
+        }
     }
 
     if (down == HIGH && up == LOW)
     {
-        doUP();
+        if (autoMove)
+        {
+            stop();
+            autoMove = false;
+        }
+        else
+        {
+            goUP();
+        }
     }
 
     modbusData[2] = slave.getInCnt();

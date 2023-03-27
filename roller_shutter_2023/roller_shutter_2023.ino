@@ -14,7 +14,7 @@
 Modbus slave;
 
 uint16_t modbusData[3];
-int address = 0;
+int address = 52;
 
 Bounce upButton = Bounce();
 Bounce downButton = Bounce();
@@ -31,12 +31,12 @@ void setup() {
     digitalWrite(UP_RELAY, LOW);
     digitalWrite(DOWN_RELAY, LOW);
 
-    bitWrite(address, 0, digitalRead(7));
-    bitWrite(address, 1, digitalRead(8));
-    bitWrite(address, 2, digitalRead(9));
-    bitWrite(address, 3, digitalRead(10));
+    //bitWrite(address, 0, digitalRead(7));
+    //bitWrite(address, 1, digitalRead(8));
+    //bitWrite(address, 2, digitalRead(9));
+    //bitWrite(address, 3, digitalRead(10));
 
-    address += 50;
+    //address += 50;
 
     upButton.attach(A2, INPUT);
     upButton.interval(25);
@@ -44,7 +44,7 @@ void setup() {
     downButton.interval(25);
 
     slave = Modbus(address, Serial, RS485PIN);
-    slave.begin(9600);
+    Serial.begin(9600);
 }
 
 int8_t state = 0;
@@ -62,8 +62,6 @@ uint16_t lastModbusRegister2 = 0;
 bool modbusChanged = false;
 
 unsigned long lastCheckTime = 0;
-
-int state = 0;
 
 void stop()
 {
@@ -93,6 +91,7 @@ void goDOWN()
 //state_closing: 3
 //state_closed: 4
 
+bool waitFlag = false;
 
 
 void loop()
@@ -129,12 +128,14 @@ void loop()
         goUP();
         autoMove = true;
         lastCheckTime = millis();
+        modbusChanged = false;
     }
 
     if (modbusChanged && modbusData[0] == 0)
     {
         stop();
         autoMove = false;
+        modbusChanged = false;
     }
 
     if (modbusChanged && modbusData[0] == 4)
@@ -142,15 +143,21 @@ void loop()
         goDOWN();
         autoMove = true;
         lastCheckTime = millis();
+        modbusChanged = false;
     }
 
-    if (down == LOW && up == LOW)
+    if (down == HIGH && up == HIGH && !autoMove)
     {
         stop();
     }
 
-    // dwa przyciski
     if (down == HIGH && up == HIGH)
+    {
+        waitFlag = false;
+    }
+
+    // dwa przyciski
+    if (down == LOW && up == LOW && !waitFlag)
     {
         if (lastDirection == 0)
         {
@@ -164,32 +171,38 @@ void loop()
         }
         lastCheckTime = millis();
         autoMove = true;
+        waitFlag = true;
+        delay(500);
     }
 
-    if (down == LOW && up == HIGH)
+    if (down == HIGH && up == LOW && !waitFlag)
     {
         if (autoMove)
         {
             stop();
             autoMove = false;
+            waitFlag = true;
         }
         else
         {
             goDOWN();
         }
+        delay(50);
     }
 
-    if (down == HIGH && up == LOW)
+    if (down == LOW && up == HIGH && !waitFlag)
     {
         if (autoMove)
         {
             stop();
             autoMove = false;
+            waitFlag = true;
         }
         else
         {
             goUP();
         }
+        delay(50);
     }
 
     modbusData[2] = slave.getInCnt();
@@ -197,7 +210,7 @@ void loop()
     lastModbusRegister1 = modbusData[0];
     modbusData[1] = state;
 
-    state = slave.poll( modbusData, 3 );
+    slave.poll( modbusData, 3 );
 
     if (modbusData[0] != lastModbusRegister1)
     {

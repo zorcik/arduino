@@ -9,15 +9,61 @@
 
 #define UP_TIME 60000
 #define DOWN_TIME 60000
-#define TILT_TIME 100
+#define TILT_TIME 2000
+
+#define ON LOW
+#define OFF HIGH
+#define UP 0
+#define DOWN 1
 
 Modbus slave;
 
-uint16_t modbusData[3];
+/**
+ * 0 - rozkaz:
+ *      0 - stop
+ *      2 - otwórz
+ *      4 - zamknij
+ * 1 - potwierdzenie
+ *      0 - stop
+ *      1 - otwiera się
+ *      2 - otwarte
+ *      3 - zamyka się
+ *      4 - zamknięte
+ * 2 - tilt [0,100]
+ * 3 - otwarcie % [0,100]
+ * 4 - stan otwarcia % [0,100]
+ * 5 - stan tilt
+ * 6 - licznik
+*/
+uint16_t modbusData[7];
 int address = 52;
 
 Bounce upButton = Bounce();
 Bounce downButton = Bounce();
+
+/**
+ * aktualny stan rolety
+*/
+int8_t state = 0;
+
+int down = HIGH;
+int up = HIGH;
+
+bool autoMove = false;
+bool lastDirection = UP; // 0 - góra, 1 - dół
+
+uint16_t lastModbusCommandRegister = 0;
+uint16_t lastModbusTiltRegister = 0;
+uint16_t lastModbusPositionRegister = 0;
+bool modbusChanged = false;
+
+unsigned long lastCheckTime = 0;
+int currentPosition = 0;
+int currentTilt = 0;
+/**
+ * jak długo już działa roleta, do wyliczenia pozycji
+*/
+unsigned long currentWorkTime = 0;
 
 void setup() {
     pinMode(7, INPUT_PULLUP);
@@ -47,27 +93,14 @@ void setup() {
     Serial.begin(9600);
 }
 
-int8_t state = 0;
-int lastUpState = HIGH;
-int lastDownState = HIGH;
 
-int down = HIGH;
-int up = HIGH;
-
-bool autoMove = false;
-bool lastDirection = 0; // 0 - góra, 1 - dół
-
-uint16_t lastModbusRegister1 = 0;
-uint16_t lastModbusRegister2 = 0;
-bool modbusChanged = false;
-
-unsigned long lastCheckTime = 0;
 
 void stop()
 {
     digitalWrite(UP_RELAY, 0);
     digitalWrite(DOWN_RELAY, 0);
     state = 0;
+    calculatePosition();
 }
 
 void goUP()
@@ -76,6 +109,7 @@ void goUP()
     delay(10);
     digitalWrite(UP_RELAY, 1);
     state = 1;
+    currentWorkTime = millis();
 }
 
 void goDOWN()
@@ -84,6 +118,29 @@ void goDOWN()
     delay(10);
     digitalWrite(DOWN_RELAY, 1);
     state = 3;
+    currentWorkTime = millis();
+}
+
+void calculatePosition()
+{
+    unsigned long timePassed = millis()-currentWorkTime;
+    int percent = (timePassed / UP_TIME) * 100;
+    if (currentPosition == UP)
+    {
+        currentPosition -= percent;
+        if (currentPosition < 0 || currentPosition > 100)
+        {
+            currentPosition = 0;
+        }
+    }
+    else if (currentPosition == DOWN)
+    {
+        currentPosition += percent;
+        if (currentPosition < 0 || currentPosition > 100)
+        {
+            currentPosition = 100;
+        }
+    }
 }
 
 //state_opening: 1
@@ -93,6 +150,49 @@ void goDOWN()
 
 bool waitFlag = false;
 
+void tilt(int percent)
+{
+    if (lastDirection == UP && currentTilt < 90)
+    {
+        if (percent > currentTilt) // podnosimy
+        {
+            unsigned long timeNeeded = (TILT_TIME * (percent-currentTilt) / 100);
+            goUP();
+        }
+        else
+        {
+            unsigned long timeNeeded = (TILT_TIME * (currentTilt-percent) / 100);
+            goDOWN();
+        }
+    }
+    else
+    {
+        goDOWN();
+        delay(TILT_TIME);
+        unsigned long timeNeeded = (TILT_TIME * (percent-currentTilt) / 100);
+        goUP();
+    }
+    delay(timeNeeded);
+    currentTilt = percent;
+    stop();
+}
+
+void goToPosition(int percent)
+{
+    if (percent > currentPosition)
+    {
+        unsigned long timeNeeded = (DOWN_TIME * (percent-currentPosition) / 100);
+        goDOWN();
+    }
+    else
+    {
+        unsigned long timeNeeded = (UP_TIME * (currentPosition-percent) / 100);
+        goUP();
+    }
+    delay(timeNeeded);
+    currentPosition = percent;
+    stop();
+}
 
 void loop()
 {
@@ -103,10 +203,14 @@ void loop()
         if (lastDirection == 0)
         {
             state = 2;
+            currentPosition = 0;
+            currentTilt = 0;
         }
         else
         {
             state = 4;
+            currentPosition = 100;
+            currentTilt = 100;
         }
     }
 
@@ -129,6 +233,7 @@ void loop()
         autoMove = true;
         lastCheckTime = millis();
         modbusChanged = false;
+        currentTilt = 100;
     }
 
     if (modbusChanged && modbusData[0] == 0)
@@ -144,38 +249,37 @@ void loop()
         autoMove = true;
         lastCheckTime = millis();
         modbusChanged = false;
+        currentTilt = 0;
     }
 
-    if (down == HIGH && up == HIGH && !autoMove)
+    if (down == OFF && up == OFF && !autoMove)
     {
         stop();
     }
 
-    if (down == HIGH && up == HIGH)
+    if (down == OFF && up == OFF)
     {
         waitFlag = false;
     }
 
     // dwa przyciski
-    if (down == LOW && up == LOW && !waitFlag)
+    if (down == ON && up == ON && !waitFlag)
     {
-        if (lastDirection == 0)
+        if (lastDirection == DOWN)
         {
-            lastDirection = 1;
             goDOWN();
         }
         else
         {
-            lastDirection = 0;
             goUP();
         }
         lastCheckTime = millis();
         autoMove = true;
         waitFlag = true;
-        delay(500);
+        delay(100);
     }
 
-    if (down == HIGH && up == LOW && !waitFlag)
+    if (down == OFF && up == ON && !waitFlag)
     {
         if (autoMove)
         {
@@ -186,11 +290,12 @@ void loop()
         else
         {
             goDOWN();
+            lastDirection = DOWN;
         }
         delay(50);
     }
 
-    if (down == LOW && up == HIGH && !waitFlag)
+    if (down == ON && up == OFF && !waitFlag)
     {
         if (autoMove)
         {
@@ -201,23 +306,46 @@ void loop()
         else
         {
             goUP();
+            lastDirection = UP;
         }
         delay(50);
     }
 
-    modbusData[2] = slave.getInCnt();
+    modbusData[4] = currentPosition;
+    modbusData[5] = currentTilt;
+    modbusData[6] = slave.getInCnt();
 
-    lastModbusRegister1 = modbusData[0];
+    lastModbusCommandRegister = modbusData[0];
+    lastModbusTiltRegister = modbusData[2];
+    lastModbusPositionRegister = modbusData[3];
     modbusData[1] = state;
 
     slave.poll( modbusData, 3 );
 
-    if (modbusData[0] != lastModbusRegister1)
+    if (modbusData[0] != lastModbusCommandRegister)
     {
         modbusChanged = true;
     }
     else
     {
         modbusChanged = false;
+    }
+
+    if (modbusData[2] != lastModbusTiltRegister)
+    {
+        int tiltPercent = modbusData[2];
+        if (tiltPercent > 0 && tiltPercent < 100)
+        {
+            tilt(tiltPercent);
+        }
+    }
+
+    if (modbusData[3] != lastModbusPositionRegister)
+    {
+        int openPercent = modbusData[3];
+        if (openPercent >= 0 && openPercent < 101)
+        {
+            goToPosition(openPercent);
+        }
     }
 }

@@ -36,7 +36,7 @@ Modbus slave;
  * 6 - licznik
 */
 uint16_t modbusData[7];
-int address = 52;
+int address = 1;
 
 Bounce upButton = Bounce();
 Bounce downButton = Bounce();
@@ -68,10 +68,16 @@ int currentTilt = 0;
 unsigned long currentWorkTime = 0;
 
 void setup() {
-    pinMode(7, INPUT_PULLUP);
-    pinMode(8, INPUT_PULLUP);
-    pinMode(9, INPUT_PULLUP);
-    pinMode(10, INPUT_PULLUP);
+    pinMode(7, INPUT);
+    pinMode(8, INPUT);
+    pinMode(9, INPUT);
+    pinMode(10, INPUT);
+
+    digitalWrite(7, LOW);
+    digitalWrite(8, LOW);
+    digitalWrite(9, LOW);
+    digitalWrite(10, LOW);
+
 
     pinMode(UP_RELAY, OUTPUT);
     pinMode(DOWN_RELAY, OUTPUT);
@@ -79,12 +85,12 @@ void setup() {
     digitalWrite(UP_RELAY, LOW);
     digitalWrite(DOWN_RELAY, LOW);
 
-    //bitWrite(address, 0, digitalRead(7));
-    //bitWrite(address, 1, digitalRead(8));
-    //bitWrite(address, 2, digitalRead(9));
-    //bitWrite(address, 3, digitalRead(10));
+    bitWrite(address, 0, digitalRead(10));
+    bitWrite(address, 1, digitalRead(9));
+    bitWrite(address, 2, digitalRead(8));
+    bitWrite(address, 3, digitalRead(7));
 
-    //address += 50;
+    address += 50;
 
     upButton.attach(A2, INPUT);
     upButton.interval(25);
@@ -93,6 +99,9 @@ void setup() {
 
     slave = Modbus(address, Serial, RS485PIN);
     Serial.begin(9600);
+//    Serial.print("Address: ");
+//    Serial.println(address);
+    
 }
 
 
@@ -155,16 +164,17 @@ bool waitFlag = false;
 
 void tilt(int percent)
 {
+    unsigned long timeNeeded = 0;
     if (lastDirection == UP && currentTilt < 90)
     {
         if (percent > currentTilt) // podnosimy
         {
-            unsigned long timeNeeded = (TILT_TIME * (percent-currentTilt) / 100);
+            timeNeeded = (TILT_TIME * (percent-currentTilt) / 100);
             goUP();
         }
         else
         {
-            unsigned long timeNeeded = (TILT_TIME * (currentTilt-percent) / 100);
+            timeNeeded = (TILT_TIME * (currentTilt-percent) / 100);
             goDOWN();
         }
     }
@@ -172,7 +182,7 @@ void tilt(int percent)
     {
         goDOWN();
         delay(TILT_TIME);
-        unsigned long timeNeeded = (TILT_TIME * (percent-currentTilt) / 100);
+        timeNeeded = (TILT_TIME * (percent-currentTilt) / 100);
         goUP();
     }
     delay(timeNeeded);
@@ -182,14 +192,15 @@ void tilt(int percent)
 
 void goToPosition(int percent)
 {
+    unsigned long timeNeeded = 0;
     if (percent > currentPosition)
     {
-        unsigned long timeNeeded = (DOWN_TIME * (percent-currentPosition) / 100);
+        timeNeeded = (DOWN_TIME * (percent-currentPosition) / 100);
         goDOWN();
     }
     else
     {
-        unsigned long timeNeeded = (UP_TIME * (currentPosition-percent) / 100);
+        timeNeeded = (UP_TIME * (currentPosition-percent) / 100);
         goUP();
     }
     positionMoveTime = millis()+timeNeeded;

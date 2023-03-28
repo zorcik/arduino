@@ -50,6 +50,7 @@ int down = HIGH;
 int up = HIGH;
 
 bool autoMove = false;
+bool positionMove = false;
 bool lastDirection = UP; // 0 - góra, 1 - dół
 
 uint16_t lastModbusCommandRegister = 0;
@@ -58,6 +59,7 @@ uint16_t lastModbusPositionRegister = 0;
 bool modbusChanged = false;
 
 unsigned long lastCheckTime = 0;
+unsigned long positionMoveTime = 0;
 int currentPosition = 0;
 int currentTilt = 0;
 /**
@@ -101,6 +103,7 @@ void stop()
     digitalWrite(DOWN_RELAY, 0);
     state = 0;
     calculatePosition();
+    positionMove = false;
 }
 
 void goUP()
@@ -189,13 +192,18 @@ void goToPosition(int percent)
         unsigned long timeNeeded = (UP_TIME * (currentPosition-percent) / 100);
         goUP();
     }
-    delay(timeNeeded);
-    currentPosition = percent;
-    stop();
+    positionMoveTime = millis()+timeNeeded;
+    positionMove = true;
 }
 
 void loop()
 {
+    if (positionMove && millis() > positionMoveTime)
+    {
+        positionMove = false;
+        stop();
+    }
+
     if (autoMove && millis() > (lastCheckTime + UP_TIME))
     {
         autoMove = false;
@@ -252,7 +260,7 @@ void loop()
         currentTilt = 0;
     }
 
-    if (down == OFF && up == OFF && !autoMove)
+    if (down == OFF && up == OFF && !autoMove && !positionMove)
     {
         stop();
     }

@@ -1,4 +1,4 @@
-//#include <ModbusRtu.h>
+// wersja płytki 3.1, w 3.0 połączyć D13 z A6
 #include <ModbusSerial.h>
 #include <Bounce2.h>
 
@@ -7,10 +7,6 @@ const uint8_t BUTTON_PINS[NUM_BUTTONS] = {A0, A1, A2, A3, A4, A5, 2, 3};
 const uint8_t OUT_PINS[NUM_BUTTONS] = {4, 5, 6, 7, 8, 9, 10, 13};
 uint8_t STATES[NUM_BUTTONS] = {LOW, LOW, LOW, LOW, LOW, LOW, LOW, LOW};
 
-
-//Modbus slave;
-
-uint16_t modbusData[9];
 int address = 50;
 Bounce * buttons = new Bounce[NUM_BUTTONS];
 ModbusSerial mb (Serial, address, -1);

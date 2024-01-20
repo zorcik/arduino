@@ -1,112 +1,76 @@
-#include <ModbusRtu.h>
+//#include <ModbusRtu.h>
+#include <ModbusSerial.h>
+#include <Bounce2.h>
 
-#define In1 A0
-#define In2 A1
-#define In3 A2
-#define In4 A3
-#define In5 A4
-#define In6 A5
-#define In7 2
-#define In8 3
+#define NUM_BUTTONS 8
+const uint8_t BUTTON_PINS[NUM_BUTTONS] = {A0, A1, A2, A3, A4, A5, 2, 3};
+const uint8_t OUT_PINS[NUM_BUTTONS] = {4, 5, 6, 7, 8, 9, 10, 13};
+uint8_t STATES[NUM_BUTTONS] = {LOW, LOW, LOW, LOW, LOW, LOW, LOW, LOW};
 
-#define OUT1 4
-#define OUT2 5
-#define OUT3 6
-#define OUT4 7
-#define OUT5 8
-#define OUT6 9
-#define OUT7 10
-#define OUT8 A6
 
-Modbus slave;
+//Modbus slave;
 
 uint16_t modbusData[9];
 int address = 50;
-uint8_t outPins = 0;
-
-uint8_t state = 0;
-uint8_t lastState = 0;
+Bounce * buttons = new Bounce[NUM_BUTTONS];
+ModbusSerial mb (Serial, address, -1);
 
 void setup()
 {
-    slave = Modbus(address, 0, 0);
-    Serial.begin(9600);
-    slave.start();
+  Serial.begin(9600, MB_PARITY_EVEN);
+  mb.config (9600);
+  mb.setAdditionalServerData ("LAMP"); // for Report Server ID function (0x11)
+  
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    buttons[i].attach( BUTTON_PINS[i] , INPUT_PULLUP  );       //setup the bounce instance for the current button
+    buttons[i].interval(25);              // interval in ms
+    pinMode(OUT_PINS[i], OUTPUT);
+    digitalWrite(OUT_PINS[i], STATES[i]);
+    mb.addCoil (i);
+    mb.setCoil(i,STATES[i]);
+    mb.addIsts(i);
+    mb.setIsts(i,STATES[i]);
+  }
 
-    pinMode(OUT1, OUTPUT);
-    pinMode(OUT2, OUTPUT);
-    pinMode(OUT3, OUTPUT);
-    pinMode(OUT4, OUTPUT);
-    pinMode(OUT5, OUTPUT);
-    pinMode(OUT6, OUTPUT);
-    pinMode(OUT7, OUTPUT);
-    pinMode(OUT8, OUTPUT);
-
-    pinMode(In1, INPUT);
-    pinMode(In2, INPUT);
-    pinMode(In3, INPUT);
-    pinMode(In4, INPUT);
-    pinMode(In5, INPUT);
-    pinMode(In6, INPUT);
-    pinMode(In7, INPUT);
-    pinMode(In8, INPUT);
 }
 
-uint8_t read()
-{
-    uint8_t temp = 0;
-    bitWrite(temp, 0, digitalRead(In1));
-    bitWrite(temp, 1, digitalRead(In2));
-    bitWrite(temp, 2, digitalRead(In3));
-    bitWrite(temp, 3, digitalRead(In4));
-    bitWrite(temp, 4, digitalRead(In5));
-    bitWrite(temp, 5, digitalRead(In6));
-    bitWrite(temp, 6, digitalRead(In7));
-    bitWrite(temp, 7, digitalRead(In8));
-    return temp;
-}
-
-void write(uint8_t data)
-{
-    digitalWrite(0, bitRead(data, 0));
-    digitalWrite(1, bitRead(data, 1));
-    digitalWrite(2, bitRead(data, 2));
-    digitalWrite(3, bitRead(data, 3));
-    digitalWrite(4, bitRead(data, 4));
-    digitalWrite(5, bitRead(data, 5));
-    digitalWrite(6, bitRead(data, 6));
-    digitalWrite(7, bitRead(data, 7));
-}
+boolean changed = false;
 
 void loop()
 {
-    state = read();
 
-    if (state != lastState)
-    {
-        delay(20); //debounce
+  mb.task();
+  
+ for (int i = 0; i < NUM_BUTTONS; i++)  {
+    // Update the Bounce instance :
+    buttons[i].update();
+    // If it fell, flag the need to toggle the LED
+    if ( buttons[i].fell() ) {
+      STATES[i] = !STATES[i];
+      changed = true;
+      mb.setCoil(i, STATES[i]);
     }
+  }
 
-    state = read();
-
-    if (state != lastState)
+  for (int i = 0; i < NUM_BUTTONS; i++)  {
+    if (mb.Coil(i) != STATES[i])
     {
-        lastState = state;
-        for (int i=0; i<8; i++)
-        {
-            if (bitRead(state, i) == LOW)
-            {
-                bitWrite(outPins, i, !bitRead(outPins, i));
-            }
-        }
-
-        write(outPins);
+      STATES[i] = mb.Coil(i);
+      changed = true;
     }
+  }
 
-    for (int i=0; i<8; i++)
-    {
-        modbusData[i] = !bitRead(outPins, i);
-    }
-    modbusData[8] = slave.getInCnt();
-    slave.poll(modbusData, 9);
+  for (int i = 0; i < NUM_BUTTONS; i++)  {
+    mb.setIsts(i,STATES[i]);
+  }
+
+
+
+if (changed)
+{
+  for (int i = 0; i < NUM_BUTTONS; i++)  {
+      digitalWrite(OUT_PINS[i], STATES[i]);
+  }
+}
+    
 }

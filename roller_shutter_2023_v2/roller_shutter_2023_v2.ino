@@ -105,6 +105,9 @@ void setup() {
     while (! Serial)
     ;
 
+    Serial.print("Address: ");
+    Serial.println(address);
+
     slave.config(9600);
 
     slave.addHreg(0);
@@ -113,8 +116,6 @@ void setup() {
     slave.addHreg(3);
     slave.addHreg(4);
     slave.addHreg(5);
-//    Serial.print("Address: ");
-//    Serial.println(address);
 
 }
 

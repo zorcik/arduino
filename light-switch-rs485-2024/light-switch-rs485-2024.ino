@@ -13,7 +13,7 @@ ModbusSerial mb(Serial, address, -1);
 
 void setup()
 {
-    Serial.begin(9600, MB_PARITY_EVEN);
+    Serial.begin(9600, MB_PARITY_NONE);
     mb.config(9600);
     mb.setAdditionalServerData("LAMP"); // for Report Server ID function (0x11)
 

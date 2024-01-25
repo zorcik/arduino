@@ -7,7 +7,7 @@ const uint8_t BUTTON_PINS[NUM_BUTTONS] = {A0, A1, A2, A3, A4, A5, 2, 3};
 const uint8_t OUT_PINS[NUM_BUTTONS] = {4, 5, 6, 7, 8, 9, 10, 13};
 uint8_t STATES[NUM_BUTTONS] = {LOW, LOW, LOW, LOW, LOW, LOW, LOW, LOW};
 
-int address = 50;
+int address = 82;
 Bounce * buttons = new Bounce[NUM_BUTTONS];
 ModbusSerial mb (Serial, address, -1);
 

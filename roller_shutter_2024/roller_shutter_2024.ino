@@ -108,7 +108,7 @@ void setup() {
     Serial.println(address);
 
     slave.config(9600);
-    mb.setAdditionalServerData("BLIND"); // for Report Server ID function (0x11)
+    slave.setAdditionalServerData("BLIND"); // for Report Server ID function (0x11)
 
     slave.addHreg(0);
     slave.addHreg(1);

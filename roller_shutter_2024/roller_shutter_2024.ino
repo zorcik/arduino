@@ -1,11 +1,18 @@
+// Kod dla żaluzji
+
 //https://github.com/epsilonrt/modbus-serial
 #include <ModbusSerial.h>
 //https://github.com/thomasfredericks/Bounce2
 #include <Bounce2.h>
+//     URL: https://github.com/RobTillaart/ACS712
+#include "ACS712.h"
 
 
 #define UP_RELAY A0
 #define DOWN_RELAY A1
+
+#define UP_ACS A4
+#define DOWN_ACS A5
 
 #define UP_TIME 60000
 #define DOWN_TIME 60000
@@ -32,11 +39,16 @@
  * 3 - otwarcie % [0,100]
  * 4 - stan otwarcia % [0,100]
  * 5 - stan tilt
+ * 6 - napięcie UP
+ * 7 - napięcie DOWN 
 */
 uint16_t modbusData[7];
-int address = 1;
+int address = 51;
 
 ModbusSerial slave(Serial, address, -1);
+
+ACS712  ACS_UP(UP_ACS, 5.0, 1023, 185);
+ACS712  ACS_DOWN(DOWN_ACS, 5.0, 1023, 185);
 
 Bounce upButton = Bounce();
 Bounce downButton = Bounce();
@@ -86,27 +98,20 @@ void setup() {
     digitalWrite(UP_RELAY, LOW);
     digitalWrite(DOWN_RELAY, LOW);
 
+/*
     bitWrite(address, 0, digitalRead(10));
     bitWrite(address, 1, digitalRead(9));
     bitWrite(address, 2, digitalRead(8));
     bitWrite(address, 3, digitalRead(7));
+*/
+//    slave.setSlaveId(address);
 
-    address += 50;
-
-    slave.setSlaveId(address);
-
-    upButton.attach(A2, INPUT);
+    upButton.attach(A3, INPUT);
     upButton.interval(25);
-    downButton.attach(A3, INPUT);
+    downButton.attach(A2, INPUT);
     downButton.interval(25);
 
     Serial.begin(9600, MB_PARITY_NONE);
-    while (! Serial)
-    ;
-
-    Serial.print("Address: ");
-    Serial.println(address);
-
     slave.config(9600);
     slave.setAdditionalServerData("BLIND"); // for Report Server ID function (0x11)
 
@@ -116,6 +121,11 @@ void setup() {
     slave.addHreg(3);
     slave.addHreg(4);
     slave.addHreg(5);
+    slave.addHreg(6);
+    slave.addHreg(7);
+
+   ACS_UP.autoMidPoint();
+   ACS_DOWN.autoMidPoint();    
 
 }
 
@@ -224,6 +234,8 @@ void goToPosition(int percent)
 
 void loop()
 {
+    slave.task();
+
     if (positionMove && millis() > positionMoveTime)
     {
         positionMove = false;
@@ -358,8 +370,8 @@ void loop()
     slave.setHreg(1, modbusData[1]);
     slave.setHreg(4, modbusData[4]);
     slave.setHreg(5, modbusData[5]);
-
-    slave.task();
+    slave.setHreg(6, ACS_UP.mA_AC_sampling());
+    slave.setHreg(7, ACS_DOWN.mA_AC_sampling());
 
     modbusData[0] = slave.Hreg(0);
     modbusData[2] = slave.Hreg(2);
@@ -391,4 +403,5 @@ void loop()
             goToPosition(openPercent);
         }
     }
+    
 }

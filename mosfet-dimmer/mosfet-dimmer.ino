@@ -1,6 +1,7 @@
 #include <ModbusSerial.h>
 #include <Encoder.h>
 #include <Bounce2.h>
+#include <avr/wdt.h>
 
 #define ONOFF A1
 #define ENC1 2
@@ -17,14 +18,16 @@ int arrayPosition = 0;
 bool status = 0;
 bool newStatus = 0;
 bool tempStatus = 1;
-bool changed = false;
-bool changed2 = false;
+long newLeft;
+int newPosition;
+
 Bounce onButton = Bounce();
 
 Encoder knob(ENC1, ENC2);
 
 void setup()
 {
+    wdt_enable(WDTO_1S);
     Serial.begin(9600, MB_PARITY_NONE);
     mb.config(9600);
     mb.setAdditionalServerData("LAMP"); // for Report Server ID function (0x11)
@@ -39,11 +42,13 @@ void setup()
     onButton.interval(25);
 }
 
+
 void loop()
 {
+    wdt_reset();
+
     mb.task();
 
-    long newLeft;
     newLeft = knob.read();
 
     if (newLeft != position)
@@ -63,7 +68,7 @@ void loop()
         mb.setHreg(0, position);
     }
 
-    int newPosition = mb.hreg(0);
+    newPosition = mb.hreg(0);
     if (newPosition != position)
     {
         position = newPosition;
@@ -93,7 +98,7 @@ void loop()
        tempStatus = HIGH;
     }
     
-    int newStatus = mb.coil(0);
+    newStatus = mb.coil(0);
     if (newStatus != status)
     {
       status = newStatus;
@@ -114,7 +119,4 @@ void loop()
         analogWrite(OUT, POSITIONS[arrayPosition]);
     }
 
-    
-    
-    changed = false;
 }

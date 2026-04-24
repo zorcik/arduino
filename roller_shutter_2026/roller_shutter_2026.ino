@@ -10,9 +10,8 @@
 #define UP_RELAY2 8
 #define DOWN_RELAY2 9
 
-#define UP_TIME 31000
-#define DOWN_TIME 31000
-#define TILT_TIME 2000
+#define UP_TIME 20000
+#define DOWN_TIME 19000
 
 #define ON LOW
 #define OFF HIGH
@@ -158,19 +157,20 @@ void goDOWN()
 void calculatePosition()
 {
     unsigned long timePassed = millis()-currentWorkTime;
-    int percent = (timePassed / UP_TIME) * 100;
     if (state == 1)
     {
+        int percent = (timePassed * 100) / UP_TIME;
         currentPosition -= percent;
-        if (currentPosition < 0 || currentPosition > 100)
+        if (currentPosition < 0)
         {
             currentPosition = 0;
         }
     }
     else if (state == 3)
     {
+        int percent = (timePassed * 100) / DOWN_TIME;
         currentPosition += percent;
-        if (currentPosition < 0 || currentPosition > 100)
+        if (currentPosition > 100)
         {
             currentPosition = 100;
         }

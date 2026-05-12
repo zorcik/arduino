@@ -177,6 +177,45 @@ void calculatePosition()
     }
 }
 
+const int sensorPinUP = A4;
+const int sensorPinDOWN = A5;
+const float sensitivity = 185; // Dla ACS712 5A (100 dla 20A, 66 dla 30A)
+
+unsigned long lastUpdate = 0;
+int sensorMaxUP = 0;
+int sensorMaxDOWN = 0;
+int sensorMinUP = 1024;
+int sensorMinDOWN = 1024;
+
+void getACSReadings() {
+
+    // 1. Szybki odczyt bez pętli blokującej
+    int sensorValueUP = analogRead(sensorPinUP);
+    int sensorValueDOWN = analogRead(sensorPinDOWN);
+
+    // 2. Szukanie szczytów fali AC w czasie rzeczywistym
+    if (sensorValueUP > sensorMaxUP) sensorMaxUP = sensorValueUP;
+    if (sensorValueUP < sensorMinUP) sensorMinUP = sensorValueUP;
+    if (sensorValueDOWN > sensorMaxDOWN) sensorMaxDOWN = sensorValueDOWN;
+    if (sensorValueDOWN < sensorMinDOWN) sensorMinDOWN = sensorValueDOWN;
+
+    // 3. Obliczanie wyniku co .2 sekundę (nie blokuje loopa)
+    if (millis() - lastUpdate >= 200) {
+        float peakToPeakUP = ((sensorMaxUP - sensorMinUP) * 5.0) / 1024.0;
+        float currentRMSUP = (peakToPeakUP / 2.0) * 0.707 * 1000 / sensitivity;
+        float peakToPeakDOWN = ((sensorMaxDOWN - sensorMinDOWN) * 5.0) / 1024.0;
+        float currentRMSDOWN = (peakToPeakDOWN / 2.0) * 0.707 * 1000 / sensitivity;
+
+        // Resetowanie wartości dla kolejnego okresu
+        sensorMaxUP = 0;
+        sensorMinUP = 1024;
+        sensorMaxDOWN = 0;
+        sensorMinDOWN = 1024;
+        lastUpdate = millis();
+    }
+
+}
+
 //state_opening: 1
 //state_open: 2
 //state_closing: 3
@@ -270,7 +309,6 @@ void loop()
         lastCheckTime = millis();
         autoMove = true;
         waitFlag = true;
-        delay(100);
     }
 
     if (down == OFF && up == ON && !waitFlag)
@@ -286,7 +324,6 @@ void loop()
             goDOWN();
             lastDirection = DOWN;
         }
-        delay(50);
     }
 
     if (down == ON && up == OFF && !waitFlag)
@@ -302,7 +339,6 @@ void loop()
             goUP();
             lastDirection = UP;
         }
-        delay(50);
     }
 
 

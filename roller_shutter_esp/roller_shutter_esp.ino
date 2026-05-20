@@ -38,7 +38,9 @@
 uint16_t modbusData[7];
 int address = 51;
 
-ModbusSerial slave(Serial, address, -1);
+HardwareSerial mySerial(1);
+
+ModbusSerial slave(mySerial, address, -1);
 
 Bounce upButton = Bounce();
 Bounce downButton = Bounce();
@@ -92,7 +94,7 @@ void setup() {
     downButton.interval(25);
 
 //    Serial.begin(9600, MB_PARITY_NONE);
-    Serial.begin(9600);
+    mySerial.begin(9600, SERIAL_8E1, 20, 21);
     slave.config(9600);
     slave.setAdditionalServerData("BLIND"); // for Report Server ID function (0x11)
 

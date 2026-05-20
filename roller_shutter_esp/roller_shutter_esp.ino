@@ -36,8 +36,9 @@
  * 5 - stan tilt
 */
 uint16_t modbusData[7];
-int address = 51;
+int address = 54;
 
+//HardwareSerial debugSerial(0);
 HardwareSerial mySerial(1);
 
 ModbusSerial slave(mySerial, address, -1);
@@ -71,17 +72,6 @@ unsigned long currentWorkTime = 0;
 
 void setup() {
 
-    pinMode(7, INPUT);
-    pinMode(8, INPUT);
-    pinMode(9, INPUT);
-    pinMode(10, INPUT);
-
-    digitalWrite(7, LOW);
-    digitalWrite(8, LOW);
-    digitalWrite(9, LOW);
-    digitalWrite(10, LOW);
-
-
     pinMode(UP_RELAY, OUTPUT);
     pinMode(DOWN_RELAY, OUTPUT);
 
@@ -94,7 +84,8 @@ void setup() {
     downButton.interval(25);
 
 //    Serial.begin(9600, MB_PARITY_NONE);
-    mySerial.begin(9600, SERIAL_8E1, 20, 21);
+    Serial.begin(9600);
+    mySerial.begin(9600, SERIAL_8N1, 10, 20);
     slave.config(9600);
     slave.setAdditionalServerData("BLIND"); // for Report Server ID function (0x11)
 
@@ -104,6 +95,7 @@ void setup() {
     slave.addHreg(3);
     slave.addHreg(4);
     slave.addHreg(5);
+
 }
 
 
@@ -215,6 +207,7 @@ unsigned long mils = 0;
 
 void loop()
 {
+    
     mils = millis();
 
     slave.task();
@@ -353,4 +346,12 @@ void loop()
     {
         modbusChanged = false;
     }
+
+//    mySerial.println("TEST");
+//    delay(100);
+    
+
+//    if (mySerial.available()) {
+//        Serial.write(mySerial.read());
+//    }
 }

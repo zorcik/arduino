@@ -1,0 +1,346 @@
+#include <avr/wdt.h>
+
+//https://github.com/epsilonrt/modbus-serial
+#include <ModbusSerial.h>
+//https://github.com/thomasfredericks/Bounce2
+#include <Bounce2.h>
+
+#define UP_RELAY A0
+#define DOWN_RELAY A1
+
+#define UP_TIME 20000
+#define DOWN_TIME 19000
+
+#define ON LOW
+#define OFF HIGH
+#define UP 0
+#define DOWN 1
+
+
+
+/**
+ * 0 - rozkaz:
+ *      0 - stop
+ *      2 - otwórz
+ *      4 - zamknij
+ * 1 - potwierdzenie
+ *      0 - stop
+ *      1 - otwiera się
+ *      2 - otwarte
+ *      3 - zamyka się
+ *      4 - zamknięte
+ * 2 - tilt [0,100]
+ * 3 - otwarcie % [0,100]
+ * 4 - stan otwarcia % [0,100]
+ * 5 - stan tilt
+*/
+uint16_t modbusData[7];
+int address = 51;
+
+ModbusSerial slave(Serial, address, -1);
+
+Bounce upButton = Bounce();
+Bounce downButton = Bounce();
+
+/**
+ * aktualny stan rolety
+*/
+int8_t state = 0;
+
+int down = HIGH;
+int up = HIGH;
+
+bool autoMove = false;
+bool lastDirection = UP; // 0 - góra, 1 - dół
+
+uint16_t lastModbusCommandRegister = 0;
+uint16_t lastModbusTiltRegister = 0;
+uint16_t lastModbusPositionRegister = 0;
+bool modbusChanged = false;
+
+unsigned long lastCheckTime = 0;
+unsigned long positionMoveTime = 0;
+int currentPosition = 0;
+/**
+ * jak długo już działa roleta, do wyliczenia pozycji
+*/
+unsigned long currentWorkTime = 0;
+
+void setup() {
+
+    wdt_enable(WDTO_1S);
+
+
+    pinMode(UP_RELAY, OUTPUT);
+    pinMode(DOWN_RELAY, OUTPUT);
+
+    digitalWrite(UP_RELAY, LOW);
+    digitalWrite(DOWN_RELAY, LOW);
+
+    upButton.attach(A3, INPUT);
+    upButton.interval(25);
+    downButton.attach(A2, INPUT);
+    downButton.interval(25);
+
+    Serial.begin(9600, MB_PARITY_NONE);
+    slave.config(9600);
+    slave.setAdditionalServerData("BLIND"); // for Report Server ID function (0x11)
+
+    slave.addHreg(0);
+    slave.addHreg(1);
+    slave.addHreg(2);
+    slave.addHreg(3);
+    slave.addHreg(4);
+    slave.addHreg(5);
+}
+
+
+
+void stop()
+{
+    digitalWrite(UP_RELAY, 0);
+    digitalWrite(DOWN_RELAY, 0);
+    calculatePosition();
+    state = 0;
+}
+
+void simpleStop()
+{
+    digitalWrite(UP_RELAY, 0);
+    digitalWrite(DOWN_RELAY, 0);
+}
+
+void goUP()
+{
+    digitalWrite(DOWN_RELAY, 0);
+    delay(10);
+    digitalWrite(UP_RELAY, 1);
+    state = 1;
+    currentWorkTime = millis();
+    lastDirection = UP;
+}
+
+void goDOWN()
+{
+    digitalWrite(UP_RELAY, 0);
+    delay(10);
+    digitalWrite(DOWN_RELAY, 1);
+    state = 3;
+    currentWorkTime = millis();
+    lastDirection = DOWN;
+}
+
+void calculatePosition()
+{
+    unsigned long timePassed = millis()-currentWorkTime;
+    if (state == 1)
+    {
+        int percent = (timePassed * 100) / UP_TIME;
+        currentPosition -= percent;
+        if (currentPosition < 0)
+        {
+            currentPosition = 0;
+        }
+    }
+    else if (state == 3)
+    {
+        int percent = (timePassed * 100) / DOWN_TIME;
+        currentPosition += percent;
+        if (currentPosition > 100)
+        {
+            currentPosition = 100;
+        }
+    }
+}
+
+const int sensorPinUP = A4;
+const int sensorPinDOWN = A5;
+const float sensitivity = 185; // Dla ACS712 5A (100 dla 20A, 66 dla 30A)
+
+unsigned long lastUpdate = 0;
+int sensorMaxUP = 0;
+int sensorMaxDOWN = 0;
+int sensorMinUP = 1024;
+int sensorMinDOWN = 1024;
+
+void getACSReadings() {
+
+    // 1. Szybki odczyt bez pętli blokującej
+    int sensorValueUP = analogRead(sensorPinUP);
+    int sensorValueDOWN = analogRead(sensorPinDOWN);
+
+    // 2. Szukanie szczytów fali AC w czasie rzeczywistym
+    if (sensorValueUP > sensorMaxUP) sensorMaxUP = sensorValueUP;
+    if (sensorValueUP < sensorMinUP) sensorMinUP = sensorValueUP;
+    if (sensorValueDOWN > sensorMaxDOWN) sensorMaxDOWN = sensorValueDOWN;
+    if (sensorValueDOWN < sensorMinDOWN) sensorMinDOWN = sensorValueDOWN;
+
+    // 3. Obliczanie wyniku co .2 sekundę (nie blokuje loopa)
+    if (millis() - lastUpdate >= 200) {
+        float peakToPeakUP = ((sensorMaxUP - sensorMinUP) * 5.0) / 1024.0;
+        float currentRMSUP = (peakToPeakUP / 2.0) * 0.707 * 1000 / sensitivity;
+        float peakToPeakDOWN = ((sensorMaxDOWN - sensorMinDOWN) * 5.0) / 1024.0;
+        float currentRMSDOWN = (peakToPeakDOWN / 2.0) * 0.707 * 1000 / sensitivity;
+
+        // Resetowanie wartości dla kolejnego okresu
+        sensorMaxUP = 0;
+        sensorMinUP = 1024;
+        sensorMaxDOWN = 0;
+        sensorMinDOWN = 1024;
+        lastUpdate = millis();
+    }
+
+}
+
+//state_opening: 1
+//state_open: 2
+//state_closing: 3
+//state_closed: 4
+
+bool waitFlag = false;
+
+unsigned long mils = 0;
+
+void loop()
+{
+    wdt_reset();
+
+    mils = millis();
+
+    slave.task();
+
+    if (autoMove && mils > (lastCheckTime + UP_TIME))
+    {
+        autoMove = false;
+        stop();
+        if (lastDirection == UP)
+        {
+            state = 2;
+            currentPosition = 0;
+        }
+        else
+        {
+            state = 4;
+            currentPosition = 100;
+        }
+    }
+
+    upButton.update();
+    downButton.update();
+
+    if (upButton.changed())
+    {
+        up = upButton.read();
+    }
+
+    if (downButton.changed())
+    {
+        down = downButton.read();
+    }
+
+    if (modbusChanged && modbusData[0] == 2)
+    {
+        goUP();
+        autoMove = true;
+        lastCheckTime = millis();
+        modbusChanged = false;
+    }
+
+    if (modbusChanged && modbusData[0] == 0)
+    {
+        stop();
+        autoMove = false;
+        modbusChanged = false;
+    }
+
+    if (modbusChanged && modbusData[0] == 4)
+    {
+        goDOWN();
+        autoMove = true;
+        lastCheckTime = millis();
+        modbusChanged = false;
+    }
+
+    if (down == OFF && up == OFF && !autoMove)
+    {
+        simpleStop();
+    }
+
+    if (down == OFF && up == OFF)
+    {
+        waitFlag = false;
+    }
+
+    // dwa przyciski
+    if (down == ON && up == ON && !waitFlag)
+    {
+        if (lastDirection == DOWN)
+        {
+            goDOWN();
+        }
+        else
+        {
+            goUP();
+        }
+        lastCheckTime = millis();
+        autoMove = true;
+        waitFlag = true;
+    }
+
+    if (down == OFF && up == ON && !waitFlag)
+    {
+        if (autoMove)
+        {
+            stop();
+            autoMove = false;
+            waitFlag = true;
+        }
+        else
+        {
+            goDOWN();
+            lastDirection = DOWN;
+        }
+    }
+
+    if (down == ON && up == OFF && !waitFlag)
+    {
+        if (autoMove)
+        {
+            stop();
+            autoMove = false;
+            waitFlag = true;
+        }
+        else
+        {
+            goUP();
+            lastDirection = UP;
+        }
+    }
+
+
+
+    modbusData[4] = currentPosition;
+    modbusData[5] = 99;
+
+    lastModbusCommandRegister = modbusData[0];
+    lastModbusTiltRegister = modbusData[2];
+    lastModbusPositionRegister = modbusData[3];
+    modbusData[1] = state;
+
+    slave.setHreg(1, modbusData[1]);
+    slave.setHreg(4, modbusData[4]);
+    slave.setHreg(5, modbusData[5]);
+
+    modbusData[0] = slave.hreg(0);
+    modbusData[2] = slave.hreg(2);
+    modbusData[3] = slave.hreg(3);
+
+    if (modbusData[0] != lastModbusCommandRegister)
+    {
+        modbusChanged = true;
+    }
+    else
+    {
+        modbusChanged = false;
+    }
+}

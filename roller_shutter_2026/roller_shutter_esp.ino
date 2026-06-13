@@ -1,7 +1,7 @@
 /*
  * ============================================================
- *  ROLLER SHUTTER CONTROLLER v2.0
- *  MCU: ATmega328P (Arduino Nano / Uno)
+ *  ROLLER SHUTTER CONTROLLER v2.0 — ESP32-C3
+ *  MCU: ESP32-C3 (RISC-V, single-core)
  * ============================================================
  *
  * Modbus RTU Holding Registers:
@@ -14,50 +14,68 @@
  *   HR 5 [R] UP_TIME       calibrated time in 100ms units
  *   HR 6 [R] DOWN_TIME     calibrated time in 100ms units
  *
- * EEPROM Layout:
+ * EEPROM Layout (flash-backed):
  *   0x00 [1B]  Magic byte (0xA5 = valid data)
  *   0x01 [1B]  Modbus address (uint8_t)
  *   0x02 [4B]  UP_TIME in ms (uint32_t)
  *   0x06 [4B]  DOWN_TIME in ms (uint32_t)
  *
  * Pinout:
- *   A0 = UP relay    (active HIGH)
- *   A1 = DOWN relay  (active HIGH)
- *   A2 = DOWN button (active LOW, internal pull-up)
- *   A3 = UP button   (active LOW, internal pull-up)
- *   A4 = ACS712 current sensor — UP channel
- *   A5 = ACS712 current sensor — DOWN channel
- *   D0/D1 = UART (Modbus RTU via RS-485 converter)
+ *   GPIO 0  = UP relay    (active HIGH)
+ *   GPIO 1  = DOWN relay  (active HIGH)
+ *   GPIO 2  = DOWN button (active LOW, internal pull-up)
+ *   GPIO 3  = UP button   (active LOW, internal pull-up)
+ *   GPIO 4  = ACS712 current sensor — UP channel (ADC)
+ *   GPIO 5  = ACS712 current sensor — DOWN channel (ADC)
+ *   GPIO 10 = Modbus UART RX
+ *   GPIO 20 = Modbus UART TX
+ *   USB/UART0 = Debug serial (115200 baud)
+ *
+ * NOTE: GPIO 2 is a strapping pin on ESP32-C3. If the DOWN button
+ *       is held during boot, it may affect boot mode. Consider
+ *       adding an external pull-up or using a different GPIO.
+ *
+ * Serials:
+ *   Serial  (UART0) — Debug output (115200, USB)
+ *   mySerial (UART1) — Modbus RTU (9600, GPIO 10 RX / GPIO 20 TX)
  *
  * Libraries:
  *   ModbusSerial — https://github.com/epsilonrt/modbus-serial
  *   Bounce2      — https://github.com/thomasfredericks/Bounce2
  */
 
-#include <avr/wdt.h>
 #include <EEPROM.h>
+#include "esp_task_wdt.h"
 #include <ModbusSerial.h>
 #include <Bounce2.h>
 
 // ============================================================
-// Disable WDT early after reset (some bootloaders don't do this)
-// Prevents boot loop if WDT triggered the reset.
+// DEBUG CONFIGURATION
+// When true, debug messages are printed to Serial (UART0/USB).
 // ============================================================
-void wdt_init(void) __attribute__((naked)) __attribute__((section(".init3")));
-void wdt_init(void) {
-    MCUSR = 0;
-    wdt_disable();
-}
+#define DEBUG_ENABLED  true
+
+#if DEBUG_ENABLED
+  #define DBG_PRINTF(...)  Serial.printf(__VA_ARGS__)
+#else
+  #define DBG_PRINTF(...)
+#endif
 
 // ============================================================
 // PIN DEFINITIONS
 // ============================================================
-#define UP_RELAY_PIN    A0
-#define DOWN_RELAY_PIN  A1
-#define DOWN_BTN_PIN    A2
-#define UP_BTN_PIN      A3
-#define ACS_UP_PIN      A4
-#define ACS_DOWN_PIN    A5
+#define UP_RELAY_PIN    0
+#define DOWN_RELAY_PIN  1
+#define DOWN_BTN_PIN    2
+#define UP_BTN_PIN      3
+#define ACS_UP_PIN      4
+#define ACS_DOWN_PIN    5
+
+// ============================================================
+// MODBUS SERIAL PINS (UART1)
+// ============================================================
+#define MODBUS_RX_PIN   10
+#define MODBUS_TX_PIN   20
 
 // ============================================================
 // CONFIGURATION — DEFAULTS & LIMITS
@@ -79,9 +97,10 @@ void wdt_init(void) {
 // ============================================================
 // ACS712 CURRENT SENSING
 // Adjust ACS_THRESHOLD experimentally for your motor/sensor!
-// A larger value requires more current to be detected as "flowing".
+// NOTE: ESP32-C3 uses 12-bit ADC (0-4095), so thresholds are
+// ~4x larger than on ATmega328P (10-bit, 0-1023).
 // ============================================================
-#define ACS_THRESHOLD         15       // Min peak-to-peak ADC value for current detection
+#define ACS_THRESHOLD         60       // Min peak-to-peak ADC value for current detection
 #define ACS_WINDOW_MS         200UL    // Measurement window in ms (~4 cycles of 50Hz)
 #define ACS_STARTUP_DELAY_MS  1000UL   // Ignore ACS this long after motor start
 
@@ -92,6 +111,16 @@ void wdt_init(void) {
 #define DEBOUNCE_MS            25      // Button debounce interval (ms)
 #define CAL_PAUSE_MS           500UL   // Pause between calibration direction changes (ms)
 #define CAL_SAFETY_TIMEOUT_MS  90000UL // Max time per calibration movement phase (ms)
+
+// ============================================================
+// ESP32 ADC
+// ============================================================
+#define ADC_MAX_VALUE    4095          // 12-bit ADC resolution
+
+// ============================================================
+// WATCHDOG TIMER
+// ============================================================
+#define WDT_TIMEOUT_S    3            // seconds
 
 // ============================================================
 // DIRECTIONS
@@ -136,8 +165,9 @@ void wdt_init(void) {
 #define CAL_GOING_UP_FINAL  5   // Moving up, measuring UP_TIME
 
 // ============================================================
-// EEPROM LAYOUT
+// EEPROM LAYOUT (flash-backed on ESP32)
 // ============================================================
+#define EEPROM_SIZE          16  // bytes to allocate
 #define EEPROM_MAGIC_ADDR    0   // 1 byte: magic value
 #define EEPROM_ADDRESS_ADDR  1   // 1 byte: Modbus address
 #define EEPROM_UPTIME_ADDR   2   // 4 bytes: UP_TIME (unsigned long)
@@ -157,26 +187,13 @@ void wdt_init(void) {
 #define HREG_COUNT        7
 
 // ============================================================
-// EEPROM: Load address (called during global variable init,
-// before main() — uses low-level AVR eeprom_read_byte)
-// ============================================================
-uint8_t loadAddressFromEEPROM() {
-    if (eeprom_read_byte((const uint8_t *)EEPROM_MAGIC_ADDR) == EEPROM_MAGIC_VALUE) {
-        uint8_t addr = eeprom_read_byte((const uint8_t *)EEPROM_ADDRESS_ADDR);
-        if (addr >= MIN_ADDRESS && addr <= MAX_ADDRESS) {
-            return addr;
-        }
-    }
-    return DEFAULT_ADDRESS;
-}
-
-// ============================================================
 // GLOBAL VARIABLES
 // ============================================================
 
-// --- Modbus ---
-uint8_t modbusAddress = loadAddressFromEEPROM();
-ModbusSerial slave(Serial, modbusAddress, -1);
+// --- Modbus (UART1) ---
+HardwareSerial modbusSerial(1);
+ModbusSerial* slave = nullptr;
+uint8_t modbusAddress = DEFAULT_ADDRESS;
 
 // --- Buttons ---
 Bounce upButton;
@@ -202,7 +219,7 @@ unsigned long moveTargetDuration = 0;
 
 // --- ACS712 current sensing ---
 int16_t acsMax = 0;
-int16_t acsMin = 1023;
+int16_t acsMin = ADC_MAX_VALUE;
 unsigned long acsWindowStart = 0;
 bool acsCurrentFlowing = true;
 bool acsStartupGrace = false;
@@ -217,11 +234,26 @@ uint16_t prevCommand = CMD_STOP;
 uint16_t prevTargetPos = 0;
 uint16_t prevAddress = 0;
 
+// --- Debug state tracking ---
+#if DEBUG_ENABLED
+uint8_t prevDebugState = 0xFF;
+int16_t prevDebugPos = -1;
+#endif
+
 // ============================================================
-// EEPROM: Load calibrated times (called in setup)
+// EEPROM: Load all settings (called in setup after EEPROM.begin)
 // ============================================================
-void loadTimesFromEEPROM() {
-    if (EEPROM.read(EEPROM_MAGIC_ADDR) != EEPROM_MAGIC_VALUE) return;
+void loadFromEEPROM() {
+    if (EEPROM.read(EEPROM_MAGIC_ADDR) != EEPROM_MAGIC_VALUE) {
+        DBG_PRINTF("[EEPROM] No valid data (magic=0x%02X), using defaults\n",
+                   EEPROM.read(EEPROM_MAGIC_ADDR));
+        return;
+    }
+
+    uint8_t addr = EEPROM.read(EEPROM_ADDRESS_ADDR);
+    if (addr >= MIN_ADDRESS && addr <= MAX_ADDRESS) {
+        modbusAddress = addr;
+    }
 
     unsigned long t;
     EEPROM.get(EEPROM_UPTIME_ADDR, t);
@@ -229,28 +261,36 @@ void loadTimesFromEEPROM() {
 
     EEPROM.get(EEPROM_DOWNTIME_ADDR, t);
     if (t >= 1000UL && t <= 120000UL) downTime = t;
+
+    DBG_PRINTF("[EEPROM] Loaded: addr=%d, UP=%lu ms, DOWN=%lu ms\n",
+               modbusAddress, upTime, downTime);
 }
 
 // ============================================================
 // EEPROM: Save functions
 // ============================================================
 void saveTimesToEEPROM() {
-    EEPROM.update(EEPROM_MAGIC_ADDR, EEPROM_MAGIC_VALUE);
+    EEPROM.write(EEPROM_MAGIC_ADDR, EEPROM_MAGIC_VALUE);
     EEPROM.put(EEPROM_UPTIME_ADDR, upTime);
     EEPROM.put(EEPROM_DOWNTIME_ADDR, downTime);
+    EEPROM.commit();
+    DBG_PRINTF("[EEPROM] Saved times: UP=%lu ms, DOWN=%lu ms\n", upTime, downTime);
 }
 
 void saveAddressToEEPROM(uint8_t addr) {
-    EEPROM.update(EEPROM_MAGIC_ADDR, EEPROM_MAGIC_VALUE);
-    EEPROM.update(EEPROM_ADDRESS_ADDR, addr);
+    EEPROM.write(EEPROM_MAGIC_ADDR, EEPROM_MAGIC_VALUE);
+    EEPROM.write(EEPROM_ADDRESS_ADDR, addr);
+    EEPROM.commit();
+    DBG_PRINTF("[EEPROM] Saved address: %d\n", addr);
 }
 
 // ============================================================
-// SOFTWARE RESET (via WDT trick)
+// SOFTWARE RESET
 // ============================================================
 void softwareReset() {
-    wdt_enable(WDTO_15MS);
-    while (1) {} // WDT fires → MCU resets
+    DBG_PRINTF("[RESET] Restarting ESP32...\n");
+    delay(100); // Allow debug message to flush
+    ESP.restart();
 }
 
 // ============================================================
@@ -279,7 +319,7 @@ void relayDown() {
 void resetACS() {
 #if ACS_INSTALLED
     acsMax = 0;
-    acsMin = 1023;
+    acsMin = ADC_MAX_VALUE;
     acsWindowStart = millis();
     acsCurrentFlowing = true;   // Assume current at start
     acsStartupGrace = true;     // Ignore readings during startup
@@ -351,6 +391,9 @@ void stopMotorAtEndStop() {
 
     moveMode = MOVE_NONE;
     targetPosition = -1;
+
+    DBG_PRINTF("[ACS] End-stop reached: dir=%s, pos=%d\n",
+               lastDirection == DIR_UP ? "UP" : "DOWN", currentPosition);
 }
 
 // ============================================================
@@ -404,17 +447,24 @@ void updateACS() {
 
     // Evaluate at end of each measurement window
     if ((now - acsWindowStart) >= ACS_WINDOW_MS) {
-        acsCurrentFlowing = ((acsMax - acsMin) >= ACS_THRESHOLD);
+        int16_t peakToPeak = acsMax - acsMin;
+        acsCurrentFlowing = (peakToPeak >= ACS_THRESHOLD);
+
+        DBG_PRINTF("[ACS] pp=%d thr=%d flowing=%s grace=%s\n",
+                   peakToPeak, ACS_THRESHOLD,
+                   acsCurrentFlowing ? "YES" : "NO",
+                   acsStartupGrace ? "YES" : "no");
 
         // Reset for next window
         acsMax = 0;
-        acsMin = 1023;
+        acsMin = ADC_MAX_VALUE;
         acsWindowStart = now;
     }
 
     // End startup grace period
     if (acsStartupGrace && (now - moveStartTime) >= ACS_STARTUP_DELAY_MS) {
         acsStartupGrace = false;
+        DBG_PRINTF("[ACS] Startup grace period ended\n");
     }
 }
 
@@ -441,12 +491,15 @@ void abortCalibration() {
     calPhase = CAL_IDLE;
     deviceState = STATE_STOP;
     moveMode = MOVE_NONE;
+    DBG_PRINTF("[CAL] Calibration aborted\n");
 }
 
 void startCalibration() {
 #if !ACS_INSTALLED
+    DBG_PRINTF("[CAL] Calibration skipped (ACS not installed)\n");
     return;  // Calibration requires ACS712 sensors
 #else
+    DBG_PRINTF("[CAL] Starting calibration sequence\n");
     calPhase = CAL_GOING_UP_INIT;
     moveMode = MOVE_CALIBRATE;
     startMotor(DIR_UP);
@@ -467,6 +520,7 @@ void updateCalibration() {
     // --- Handle pause phases (non-blocking timers) ---
     if (calPhase == CAL_PAUSE_1) {
         if ((now - calPhaseStart) >= CAL_PAUSE_MS) {
+            DBG_PRINTF("[CAL] Phase: GOING_DOWN (measuring DOWN_TIME)\n");
             calPhase = CAL_GOING_DOWN;
             startMotor(DIR_DOWN);
             deviceState = STATE_CALIBRATING;
@@ -477,6 +531,7 @@ void updateCalibration() {
     }
     if (calPhase == CAL_PAUSE_2) {
         if ((now - calPhaseStart) >= CAL_PAUSE_MS) {
+            DBG_PRINTF("[CAL] Phase: GOING_UP_FINAL (measuring UP_TIME)\n");
             calPhase = CAL_GOING_UP_FINAL;
             startMotor(DIR_UP);
             deviceState = STATE_CALIBRATING;
@@ -488,6 +543,7 @@ void updateCalibration() {
 
     // --- Safety timeout for movement phases ---
     if ((now - calPhaseStart) > CAL_SAFETY_TIMEOUT_MS) {
+        DBG_PRINTF("[CAL] Safety timeout! Phase=%d\n", calPhase);
         abortCalibration();
         return;
     }
@@ -500,6 +556,7 @@ void updateCalibration() {
         case CAL_GOING_UP_INIT:
             // Reached top end-stop → pause before going down
             relayStop();
+            DBG_PRINTF("[CAL] Top end-stop reached, pausing...\n");
             calPhase = CAL_PAUSE_1;
             calPhaseStart = now;
             break;
@@ -508,6 +565,7 @@ void updateCalibration() {
             // Reached bottom end-stop → record DOWN_TIME
             downTime = now - calMeasureStart;
             relayStop();
+            DBG_PRINTF("[CAL] Bottom end-stop reached, DOWN_TIME=%lu ms\n", downTime);
             calPhase = CAL_PAUSE_2;
             calPhaseStart = now;
             break;
@@ -516,11 +574,13 @@ void updateCalibration() {
             // Reached top end-stop → record UP_TIME, save, done
             upTime = now - calMeasureStart;
             relayStop();
+            DBG_PRINTF("[CAL] Top end-stop reached, UP_TIME=%lu ms\n", upTime);
             saveTimesToEEPROM();
             currentPosition = 0;
             deviceState = STATE_OPEN;
             moveMode = MOVE_NONE;
             calPhase = CAL_IDLE;
+            DBG_PRINTF("[CAL] Calibration complete!\n");
             break;
     }
 }
@@ -529,14 +589,15 @@ void updateCalibration() {
 // MODBUS COMMAND PROCESSING
 // ============================================================
 void processModbus() {
-    uint16_t command   = slave.hreg(HREG_COMMAND);
-    uint16_t targetPos = slave.hreg(HREG_TARGET_POS);
-    uint16_t address   = slave.hreg(HREG_ADDRESS);
+    uint16_t command   = slave->hreg(HREG_COMMAND);
+    uint16_t targetPos = slave->hreg(HREG_TARGET_POS);
+    uint16_t address   = slave->hreg(HREG_ADDRESS);
 
     // --- HR 0: Command register ---
     if (command != prevCommand) {
         switch (command) {
             case CMD_STOP:
+                DBG_PRINTF("[CMD] STOP\n");
                 if (calPhase != CAL_IDLE) {
                     abortCalibration();
                 } else if (moveMode != MOVE_NONE) {
@@ -545,6 +606,7 @@ void processModbus() {
                 break;
 
             case CMD_OPEN:
+                DBG_PRINTF("[CMD] OPEN\n");
                 if (calPhase == CAL_IDLE) {
                     if (moveMode != MOVE_NONE) stopMotor();
                     startMotor(DIR_UP);
@@ -555,6 +617,7 @@ void processModbus() {
                 break;
 
             case CMD_CLOSE:
+                DBG_PRINTF("[CMD] CLOSE\n");
                 if (calPhase == CAL_IDLE) {
                     if (moveMode != MOVE_NONE) stopMotor();
                     startMotor(DIR_DOWN);
@@ -565,23 +628,32 @@ void processModbus() {
                 break;
 
             case CMD_CALIBRATE:
+                DBG_PRINTF("[CMD] CALIBRATE\n");
 #if ACS_INSTALLED
                 if (calPhase != CAL_IDLE) abortCalibration();
                 if (moveMode != MOVE_NONE) stopMotor();
                 startCalibration();
+#else
+                DBG_PRINTF("[CMD] Calibration ignored (ACS not installed)\n");
 #endif
+                break;
+
+            default:
+                DBG_PRINTF("[CMD] Unknown command: %d\n", command);
                 break;
         }
 
         // Auto-clear: reset register to STOP so the same command
         // can be sent again without needing to write a different value first
-        slave.setHreg(HREG_COMMAND, CMD_STOP);
+        slave->setHreg(HREG_COMMAND, CMD_STOP);
         prevCommand = CMD_STOP;
     }
 
     // --- HR 2: Target position register ---
     if (targetPos != prevTargetPos) {
         prevTargetPos = targetPos;
+
+        DBG_PRINTF("[POS] Target position received: %d\n", targetPos);
 
         if (calPhase == CAL_IDLE && targetPos <= 100) {
             int16_t target = (int16_t)targetPos;
@@ -605,6 +677,12 @@ void processModbus() {
                                      * getTimeForDirection(direction) / 100UL;
                 startMotor(direction);
                 moveMode = MOVE_AUTO;
+
+                DBG_PRINTF("[POS] Moving %s: %d -> %d (%lu ms)\n",
+                           direction == DIR_UP ? "UP" : "DOWN",
+                           current, target, moveTargetDuration);
+            } else {
+                DBG_PRINTF("[POS] Already at target, ignoring\n");
             }
         }
     }
@@ -615,6 +693,7 @@ void processModbus() {
 
         if (address >= MIN_ADDRESS && address <= MAX_ADDRESS &&
             (uint8_t)address != modbusAddress) {
+            DBG_PRINTF("[ADDR] Changing address: %d -> %d\n", modbusAddress, address);
             // Stop everything before reset
             if (moveMode != MOVE_NONE) stopMotor();
             if (calPhase != CAL_IDLE) abortCalibration();
@@ -661,6 +740,8 @@ void processButtons() {
         moveTargetDuration = getTimeForDirection(dir);
         targetPosition = -1;
         waitFlag = true;
+        DBG_PRINTF("[BTN] Both pressed: full travel %s\n",
+                   dir == DIR_UP ? "UP" : "DOWN");
         return;
     }
 
@@ -671,6 +752,7 @@ void processButtons() {
     if (moveMode == MOVE_AUTO) {
         stopMotor();
         waitFlag = true;
+        DBG_PRINTF("[BTN] Auto-move interrupted\n");
         return;
     }
 
@@ -686,54 +768,82 @@ void processButtons() {
 // SETUP
 // ============================================================
 void setup() {
-    // Relay pins OFF first
+    // --- Debug serial (UART0 / USB) ---
+    Serial.begin(115200);
+    delay(500); // Allow USB serial to initialize
+    DBG_PRINTF("\n========================================\n");
+    DBG_PRINTF(" ROLLER SHUTTER CONTROLLER v2.0\n");
+    DBG_PRINTF(" MCU: ESP32-C3\n");
+    DBG_PRINTF("========================================\n");
+
+    // --- Relay pins OFF first ---
     pinMode(UP_RELAY_PIN, OUTPUT);
     pinMode(DOWN_RELAY_PIN, OUTPUT);
     digitalWrite(UP_RELAY_PIN, LOW);
     digitalWrite(DOWN_RELAY_PIN, LOW);
+    DBG_PRINTF("[BOOT] Relays initialized (OFF)\n");
 
-    // Buttons with internal pull-ups
+    // --- Buttons with internal pull-ups ---
     upButton.attach(UP_BTN_PIN, INPUT_PULLUP);
     upButton.interval(DEBOUNCE_MS);
     downButton.attach(DOWN_BTN_PIN, INPUT_PULLUP);
     downButton.interval(DEBOUNCE_MS);
+    DBG_PRINTF("[BOOT] Buttons initialized (A2/A3 with pull-up)\n");
 
-    // Load calibrated travel times from EEPROM
-    loadTimesFromEEPROM();
+    // --- EEPROM (flash-backed) ---
+    EEPROM.begin(EEPROM_SIZE);
+    loadFromEEPROM();
+    DBG_PRINTF("[BOOT] Config: addr=%d, UP=%lu ms, DOWN=%lu ms\n",
+               modbusAddress, upTime, downTime);
 
-    // Initialize Modbus RTU
-    slave.config(9600);
-    slave.setAdditionalServerData("BLIND");
+    // --- Modbus RTU (UART1) ---
+    slave = new ModbusSerial(modbusSerial, modbusAddress, -1);
+    slave->config(9600);
+    modbusSerial.begin(9600, SERIAL_8N1, MODBUS_RX_PIN, MODBUS_TX_PIN);
+    slave->setAdditionalServerData("BLIND");
 
     // Register holding registers
     for (uint8_t i = 0; i < HREG_COUNT; i++) {
-        slave.addHreg(i);
+        slave->addHreg(i);
     }
 
     // Set initial output register values
-    slave.setHreg(HREG_STATE, deviceState);
-    slave.setHreg(HREG_CURRENT_POS, currentPosition);
-    slave.setHreg(HREG_ADDRESS, modbusAddress);
-    slave.setHreg(HREG_UPTIME, (uint16_t)(upTime / 100UL));
-    slave.setHreg(HREG_DOWNTIME, (uint16_t)(downTime / 100UL));
+    slave->setHreg(HREG_STATE, deviceState);
+    slave->setHreg(HREG_CURRENT_POS, currentPosition);
+    slave->setHreg(HREG_ADDRESS, modbusAddress);
+    slave->setHreg(HREG_UPTIME, (uint16_t)(upTime / 100UL));
+    slave->setHreg(HREG_DOWNTIME, (uint16_t)(downTime / 100UL));
 
     // Initialize change detection baselines
     prevCommand = CMD_STOP;
     prevTargetPos = 0;
     prevAddress = modbusAddress;
 
-    // Enable Watchdog Timer — 2 second timeout
-    wdt_enable(WDTO_2S);
+    DBG_PRINTF("[BOOT] Modbus initialized: addr=%d, UART1 RX=%d TX=%d\n",
+               modbusAddress, MODBUS_RX_PIN, MODBUS_TX_PIN);
+
+    // --- Watchdog Timer ---
+    // NOTE: If using Arduino ESP32 core 3.x (ESP-IDF 5.x), you may need:
+    //   esp_task_wdt_config_t cfg = { .timeout_ms=3000, .idle_core_mask=0, .trigger_panic=true };
+    //   esp_task_wdt_reconfigure(&cfg);
+    //   esp_task_wdt_add(NULL);
+    esp_task_wdt_init(WDT_TIMEOUT_S, true);
+    esp_task_wdt_add(NULL);
+    DBG_PRINTF("[BOOT] WDT initialized (%d s)\n", WDT_TIMEOUT_S);
+
+    DBG_PRINTF("[BOOT] Setup complete. ACS installed: %s\n",
+               ACS_INSTALLED ? "YES" : "NO");
+    DBG_PRINTF("========================================\n\n");
 }
 
 // ============================================================
 // MAIN LOOP
 // ============================================================
 void loop() {
-    wdt_reset();
+    esp_task_wdt_reset();
 
     // 1. Process incoming Modbus frames
-    slave.task();
+    slave->task();
 
     // 2. Update ACS712 current sensing (only when motor is active)
 #if ACS_INSTALLED
@@ -761,6 +871,7 @@ void loop() {
                 // Position move completed → set exact target position
                 currentPosition = targetPosition;
                 deviceState = STATE_STOP;
+                DBG_PRINTF("[MOVE] Position target reached: %d%%\n", currentPosition);
             } else {
                 // Full travel completed → set end position
                 if (lastDirection == DIR_UP) {
@@ -770,6 +881,7 @@ void loop() {
                     currentPosition = 100;
                     deviceState = STATE_CLOSED;
                 }
+                DBG_PRINTF("[MOVE] Full travel completed: pos=%d\n", currentPosition);
             }
             moveMode = MOVE_NONE;
             targetPosition = -1;
@@ -779,6 +891,7 @@ void loop() {
     // 7. Check manual movement safety timeout
     if (moveMode == MOVE_MANUAL) {
         if ((millis() - moveStartTime) >= moveTargetDuration) {
+            DBG_PRINTF("[MOVE] Manual safety timeout\n");
             stopMotor();
         }
     }
@@ -791,9 +904,24 @@ void loop() {
 #endif
 
     // 9. Update Modbus output registers
-    slave.setHreg(HREG_STATE, deviceState);
-    slave.setHreg(HREG_CURRENT_POS, (uint16_t)getEstimatedPosition());
-    slave.setHreg(HREG_ADDRESS, modbusAddress);
-    slave.setHreg(HREG_UPTIME, (uint16_t)(upTime / 100UL));
-    slave.setHreg(HREG_DOWNTIME, (uint16_t)(downTime / 100UL));
+    slave->setHreg(HREG_STATE, deviceState);
+    slave->setHreg(HREG_CURRENT_POS, (uint16_t)getEstimatedPosition());
+    slave->setHreg(HREG_ADDRESS, modbusAddress);
+    slave->setHreg(HREG_UPTIME, (uint16_t)(upTime / 100UL));
+    slave->setHreg(HREG_DOWNTIME, (uint16_t)(downTime / 100UL));
+
+    // 10. Debug: print state/position changes
+#if DEBUG_ENABLED
+    uint8_t curState = deviceState;
+    int16_t curPos = getEstimatedPosition();
+    if (curState != prevDebugState || curPos != prevDebugPos) {
+        static const char* stateNames[] = {
+            "STOP", "OPENING", "OPEN", "CLOSING", "CLOSED", "CALIBRATING"
+        };
+        const char* name = (curState <= 5) ? stateNames[curState] : "?";
+        DBG_PRINTF("[REG] state=%d(%s) pos=%d%%\n", curState, name, curPos);
+        prevDebugState = curState;
+        prevDebugPos = curPos;
+    }
+#endif
 }

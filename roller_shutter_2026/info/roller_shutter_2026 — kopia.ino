@@ -69,14 +69,6 @@ void wdt_init(void) {
 #define MAX_ADDRESS        80
 
 // ============================================================
-// ACS712 HARDWARE PRESENCE
-// Set to false if ACS712 sensors are NOT installed on the board.
-// When false: current sensing, end-stop detection and calibration
-// are fully disabled. Only predefined/EEPROM travel times are used.
-// ============================================================
-#define ACS_INSTALLED      true
-
-// ============================================================
 // ACS712 CURRENT SENSING
 // Adjust ACS_THRESHOLD experimentally for your motor/sensor!
 // A larger value requires more current to be detected as "flowing".
@@ -277,13 +269,11 @@ void relayDown() {
 // ACS712: Reset tracking for new movement
 // ============================================================
 void resetACS() {
-#if ACS_INSTALLED
     acsMax = 0;
     acsMin = 1023;
     acsWindowStart = millis();
     acsCurrentFlowing = true;   // Assume current at start
     acsStartupGrace = true;     // Ignore readings during startup
-#endif
 }
 
 // ============================================================
@@ -423,13 +413,9 @@ void updateACS() {
  * Only valid after startup grace period and during active movement.
  */
 bool isEndStopReached() {
-#if !ACS_INSTALLED
-    return false;              // No ACS → no end-stop detection
-#else
     if (acsStartupGrace) return false;
     if (moveMode == MOVE_NONE && calPhase == CAL_IDLE) return false;
     return !acsCurrentFlowing;
-#endif
 }
 
 // ============================================================
@@ -444,15 +430,11 @@ void abortCalibration() {
 }
 
 void startCalibration() {
-#if !ACS_INSTALLED
-    return;  // Calibration requires ACS712 sensors
-#else
     calPhase = CAL_GOING_UP_INIT;
     moveMode = MOVE_CALIBRATE;
     startMotor(DIR_UP);
     deviceState = STATE_CALIBRATING;   // Override startMotor's state
     calPhaseStart = millis();
-#endif
 }
 
 /**
@@ -565,11 +547,9 @@ void processModbus() {
                 break;
 
             case CMD_CALIBRATE:
-#if ACS_INSTALLED
                 if (calPhase != CAL_IDLE) abortCalibration();
                 if (moveMode != MOVE_NONE) stopMotor();
                 startCalibration();
-#endif
                 break;
         }
 
@@ -736,11 +716,9 @@ void loop() {
     slave.task();
 
     // 2. Update ACS712 current sensing (only when motor is active)
-#if ACS_INSTALLED
     if (moveMode != MOVE_NONE || calPhase != CAL_IDLE) {
         updateACS();
     }
-#endif
 
     // 3. Run calibration state machine
     if (calPhase != CAL_IDLE) {
@@ -784,11 +762,9 @@ void loop() {
     }
 
     // 8. Check ACS712 end-stop detection (normal movement only)
-#if ACS_INSTALLED
     if ((moveMode == MOVE_AUTO || moveMode == MOVE_MANUAL) && isEndStopReached()) {
         stopMotorAtEndStop();
     }
-#endif
 
     // 9. Update Modbus output registers
     slave.setHreg(HREG_STATE, deviceState);

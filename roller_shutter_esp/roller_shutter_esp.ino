@@ -46,7 +46,6 @@
 
 #include <WiFi.h>
 #include <EEPROM.h>
-//#include "esp_task_wdt.h"
 #include <ModbusSerial.h>
 #include <Bounce2.h>
 
@@ -126,11 +125,6 @@
 // ESP32 ADC
 // ============================================================
 #define ADC_MAX_VALUE    4095          // 12-bit ADC resolution
-
-// ============================================================
-// WATCHDOG TIMER
-// ============================================================
-#define WDT_TIMEOUT_S    3            // seconds
 
 // ============================================================
 // DIRECTIONS
@@ -835,15 +829,6 @@ void setup() {
 
     DBG_PRINTF("[BOOT] Modbus initialized: addr=%d, UART1 RX=%d TX=%d\n",
                modbusAddress, MODBUS_RX_PIN, MODBUS_TX_PIN);
-
-    // --- Watchdog Timer ---
-    // NOTE: If using Arduino ESP32 core 3.x (ESP-IDF 5.x), you may need:
-    //   esp_task_wdt_config_t cfg = { .timeout_ms=3000, .idle_core_mask=0, .trigger_panic=true };
-    //   esp_task_wdt_reconfigure(&cfg);
-    //   esp_task_wdt_add(NULL);
-    //esp_task_wdt_init(WDT_TIMEOUT_S, true);
-    //esp_task_wdt_add(NULL);
-    //DBG_PRINTF("[BOOT] WDT initialized (%d s)\n", WDT_TIMEOUT_S);
 
     DBG_PRINTF("[BOOT] Setup complete. ACS installed: %s\n",
                ACS_INSTALLED ? "YES" : "NO");
